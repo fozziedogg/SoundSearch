@@ -85,22 +85,16 @@ struct WaveformView: View {
                         dragStart = nil
                         let minSelectionPx: CGFloat = 4
                         if abs(val.location.x - val.startLocation.x) < minSelectionPx {
-                            // Treat as tap: seek without clearing the selection so the
-                            // user can preview position while keeping their selection intact.
                             player.seek(to: frac)
                             if playOnClick { player.play() }
                         }
-                        // Otherwise: selection was committed by the drag — leave it
                     }
             )
             .onTapGesture { location in
-                // Move the playhead without clearing the selection — the user may
-                // be previewing a position before dragging the selection to PT.
                 player.seek(to: clamp(location.x / geo.size.width))
                 if playOnClick { player.play() }
             }
             .onAppear { loadPeaks(width: Int(geo.size.width)) }
-            .onChange(of: url) { _ in loadPeaks(width: Int(geo.size.width)) }
         }
     }
 
@@ -109,15 +103,16 @@ struct WaveformView: View {
     private func clamp(_ v: Double) -> Double { min(max(v, 0), 1) }
 
     private func loadPeaks(width: Int) {
-        if let cached = ThumbnailCache.shared.get(url: url.path, mtime: mtime, width: width) {
+        let targetURL   = url
+        let targetMtime = mtime
+        if let cached = ThumbnailCache.shared.get(url: targetURL.path, mtime: targetMtime, width: width) {
             peaks = cached
             return
         }
         Task.detached(priority: .userInitiated) {
-            if let generated = try? await WaveformGenerator.peaks(for: url, targetSamples: width) {
-                ThumbnailCache.shared.set(peaks: generated, url: url.path, mtime: mtime, width: width)
-                await MainActor.run { peaks = generated }
-            }
+            guard let generated = try? await WaveformGenerator.peaks(for: targetURL, targetSamples: width) else { return }
+            ThumbnailCache.shared.set(peaks: generated, url: targetURL.path, mtime: targetMtime, width: width)
+            await MainActor.run { peaks = generated }
         }
     }
 }

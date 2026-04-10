@@ -16,6 +16,7 @@ struct DetailView: View {
                 .frame(height: 80)
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
+                .id(file.id)
 
             WaveformDragBar(file: file)
                 .environmentObject(env.audioPlayer)
@@ -59,8 +60,8 @@ struct DetailView: View {
             env.audioPlayer.load(url: URL(fileURLWithPath: file.fileURL))
             if env.autoPlayOnSelect { env.audioPlayer.play() }
         }
-        .onChange(of: file.id) { _ in
-            env.audioPlayer.load(url: URL(fileURLWithPath: file.fileURL))
+        .onChange(of: file.fileURL) { _, newURL in
+            env.audioPlayer.load(url: URL(fileURLWithPath: newURL))
             if env.autoPlayOnSelect { env.audioPlayer.play() }
         }
     }

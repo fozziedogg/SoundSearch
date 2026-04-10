@@ -1,22 +1,31 @@
 import SwiftUI
-import AppKit
 import AVFoundation
 import UniformTypeIdentifiers
 
-// MARK: - SwiftUI wrapper
+// MARK: - View
 
-struct WaveformDragBar: NSViewRepresentable {
+struct WaveformDragBar: View {
     let file: AudioFile
     @EnvironmentObject var player: AudioPlayer
 
-    func makeNSView(context: Context) -> DragBarNSView {
-        DragBarNSView()
+    var body: some View {
+        dragBarShape
+            .onDrag { makeItemProvider() }
     }
 
-    func updateNSView(_ nsView: DragBarNSView, context: Context) {
-        nsView.file   = file
-        nsView.player = player
-        nsView.label  = labelText
+    // MARK: - Appearance
+
+    private var dragBarShape: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.accentColor.opacity(0.07))
+            RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(Color.accentColor.opacity(0.25), lineWidth: 1)
+            Text(labelText)
+                .font(.system(size: 11))
+                .foregroundColor(.accentColor)
+                .padding(.leading, 8)
+        }
     }
 
     private var labelText: String {
@@ -29,173 +38,62 @@ struct WaveformDragBar: NSViewRepresentable {
             : "⠿  Drag to PT Timeline"
     }
 
-    private func fmt(_ t: Double) -> String { String(format: "%.3fs", t) }
-
     private var hasSelection: Bool {
         guard let s = player.selectionStart, let e = player.selectionEnd else { return false }
         return e > s
     }
-}
 
-// MARK: - NSView
+    private func fmt(_ t: Double) -> String { String(format: "%.3fs", t) }
 
-/// Pure-AppKit drag bar. Drag detection runs entirely inside mouseDown via
-/// window.nextEvent(matching:), bypassing SwiftUI's event routing entirely.
-/// NSViewRepresentable views cannot rely on mouseDragged being forwarded by
-/// SwiftUI's NSHostingView once a DragGesture is present anywhere in the tree.
-final class DragBarNSView: NSView, NSDraggingSource {
+    // MARK: - Drag item provider
 
-    var file:   AudioFile?
-    var player: AudioPlayer?
-
-    var label: String = "Drag to PT Timeline" {
-        didSet { needsDisplay = true }
-    }
-
-    /// Strong ref — NSFilePromiseProvider holds its delegate weakly.
-    private var activeDragProvider: DragBarFileProvider?
-
-    // MARK: Drawing
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
-                                xRadius: 4, yRadius: 4)
-        NSColor.controlAccentColor.withAlphaComponent(0.07).setFill()
-        path.fill()
-        NSColor.controlAccentColor.withAlphaComponent(0.25).setStroke()
-        path.lineWidth = 1
-        path.stroke()
-
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11),
-            .foregroundColor: NSColor.controlAccentColor
-        ]
-        let str = NSAttributedString(string: label, attributes: attrs)
-        let sz  = str.size()
-        str.draw(at: NSPoint(x: 8, y: (bounds.height - sz.height) / 2))
-    }
-
-    // MARK: Mouse
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func mouseDown(with event: NSEvent) {
-        guard let file, let player, let window else { return }
-
-        // Spin a local AppKit event loop until the mouse moves enough to be a
-        // drag or the button is released. This runs entirely in AppKit and is
-        // unaffected by SwiftUI's NSHostingView event routing.
-        let threshold: CGFloat = 9   // px² (= 3 px euclidean)
-        var dragEvent: NSEvent?
-
-        eventLoop: while true {
-            guard let e = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
-            switch e.type {
-            case .leftMouseUp:
-                break eventLoop
-            case .leftMouseDragged:
-                if e.deltaX * e.deltaX + e.deltaY * e.deltaY >= threshold {
-                    dragEvent = e
-                    break eventLoop
-                }
-            default:
-                break
-            }
-        }
-
-        guard let dragEvent else { return }
-
-        // Build the provider
+    private func makeItemProvider() -> NSItemProvider {
         let sourceURL    = URL(fileURLWithPath: file.fileURL)
         let selStart     = player.selectionStart
         let selEnd       = player.selectionEnd
         let hasSelection = selStart != nil && selEnd != nil && (selEnd ?? 0) > (selStart ?? 0)
 
-        let timeRef: UInt64? = hasSelection
-            ? DragBarFileProvider.selectionTimeReference(file: file,
-                                                         selectionStart: selStart ?? 0)
-            : nil
+        // Build the file to deliver synchronously (in-process AVAudioFile copy, ~< 50 ms).
+        let deliverURL: URL
 
-        let provider = DragBarFileProvider(
-            sourceURL:      sourceURL,
-            selectionStart: hasSelection ? selStart : nil,
-            selectionEnd:   hasSelection ? selEnd   : nil,
-            timeReference:  timeRef
-        )
-        activeDragProvider = provider
+        if hasSelection, let s = selStart, let e = selEnd {
+            let exported: URL?
+            do {
+                exported = try DragBarHelper.exportSelection(from: sourceURL, start: s, end: e)
+            } catch {
+                print("[Drag] exportSelection failed for \(sourceURL.lastPathComponent): \(error)")
+                exported = nil
+            }
 
-        let item = NSDraggingItem(pasteboardWriter: provider.makePromiseProvider())
-        item.setDraggingFrame(bounds, contents: nil)
-        beginDraggingSession(with: [item], event: dragEvent, source: self)
-    }
+            if let exported {
+                let timeRef = DragBarHelper.selectionTimeReference(file: file, selectionStart: s)
+                if let ref = timeRef,
+                   let patched = try? SpotFileBuilder.buildSpotFile(source: exported, sampleOffset: ref) {
+                    deliverURL = patched
+                } else {
+                    deliverURL = exported
+                }
+            } else {
+                deliverURL = sourceURL
+            }
+        } else {
+            deliverURL = sourceURL
+        }
 
-    // MARK: NSDraggingSource
-
-    func draggingSession(_ session: NSDraggingSession,
-                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .copy }
-
-    func draggingSession(_ session: NSDraggingSession,
-                         endedAt screenPoint: NSPoint,
-                         operation: NSDragOperation) {
-        activeDragProvider = nil
+        // registerObject(url as NSURL) puts public.file-url on the pasteboard —
+        // the type Pro Tools checks for in draggingEntered:.
+        // NSItemProvider(contentsOf:) was wrong: it puts the audio *data* on the
+        // pasteboard keyed by UTI (e.g. com.microsoft.waveform-audio), which PT
+        // doesn't check for. PT needs the file *path*, not inline audio bytes.
+        let provider = NSItemProvider()
+        provider.registerObject(deliverURL as NSURL, visibility: .all)
+        return provider
     }
 }
 
-// MARK: - File promise provider
+// MARK: - File helpers
 
-final class DragBarFileProvider: NSObject, NSFilePromiseProviderDelegate {
-
-    private let sourceURL:      URL
-    private let selectionStart: Double?
-    private let selectionEnd:   Double?
-    private let timeReference:  UInt64?
-
-    init(sourceURL: URL, selectionStart: Double?, selectionEnd: Double?, timeReference: UInt64?) {
-        self.sourceURL      = sourceURL
-        self.selectionStart = selectionStart
-        self.selectionEnd   = selectionEnd
-        self.timeReference  = timeReference
-        super.init()
-    }
-
-    func makePromiseProvider() -> NSFilePromiseProvider {
-        let ext  = sourceURL.pathExtension.lowercased()
-        let type = (ext == "aiff" || ext == "aif") ? UTType.aiff.identifier : UTType.wav.identifier
-        return NSFilePromiseProvider(fileType: type, delegate: self)
-    }
-
-    // MARK: NSFilePromiseProviderDelegate
-
-    func filePromiseProvider(_ provider: NSFilePromiseProvider,
-                              fileNameForType fileType: String) -> String {
-        selectionStart != nil
-            ? "Selection_" + sourceURL.lastPathComponent
-            : sourceURL.lastPathComponent
-    }
-
-    func filePromiseProvider(_ provider: NSFilePromiseProvider,
-                              writePromiseTo destURL: URL) async throws {
-        let fileURL: URL
-
-        if let s = selectionStart, let e = selectionEnd, e > s {
-            let exported = try Self.exportSelection(from: sourceURL, start: s, end: e)
-            if let ref = timeReference,
-               let patched = try? SpotFileBuilder.buildSpotFile(source: exported, sampleOffset: ref) {
-                fileURL = patched
-            } else {
-                fileURL = exported
-            }
-        } else {
-            fileURL = sourceURL
-        }
-
-        if FileManager.default.fileExists(atPath: destURL.path) {
-            try FileManager.default.removeItem(at: destURL)
-        }
-        try FileManager.default.copyItem(at: fileURL, to: destURL)
-    }
-
-    // MARK: Helpers
+enum DragBarHelper {
 
     static func selectionTimeReference(file: AudioFile, selectionStart: Double) -> UInt64? {
         let refLow  = UInt32(truncatingIfNeeded: file.bwfTimeRefLow)
