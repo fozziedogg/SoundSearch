@@ -30,6 +30,10 @@ final class FolderScanner {
         watchers.removeValue(forKey: path)
     }
 
+    func stopAll() {
+        watchers.removeAll()
+    }
+
     /// Force re-ingests every audio file in the folder, ignoring mtime cache.
     func rescan(path: String) async {
         await scanFolder(path: path, force: true)

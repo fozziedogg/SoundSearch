@@ -4,24 +4,27 @@ struct DetailView: View {
     @Environment(AppEnvironment.self) var env
     let file: AudioFile
 
-    @State private var selectionStart: Double? = nil
-    @State private var selectionEnd:   Double? = nil
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 // Waveform + player
                 WaveformView(url: URL(fileURLWithPath: file.fileURL),
                              mtime: file.mtime,
-                             selectionStart: $selectionStart,
-                             selectionEnd:   $selectionEnd)
+                             playOnClick: env.playOnWaveformClick)
                     .environmentObject(env.audioPlayer)
                     .frame(height: 80)
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
 
+                WaveformDragBar(file: file)
+                    .environmentObject(env.audioPlayer)
+                    .frame(height: 26)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+
                 PlayerControlsView()
                     .environmentObject(env.audioPlayer)
+                    .environment(env)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
 
@@ -32,32 +35,28 @@ struct DetailView: View {
 
                 Divider()
 
-                // Metadata form
                 MetadataFormView(file: file)
                     .padding(16)
 
                 Divider()
 
-                // Technical info (read-only)
                 TechnicalInfoView(file: file)
                     .padding(16)
 
                 Divider()
 
-                // ProTools spot
-                ProToolsSpotView(file: file,
-                                 selectionStart: selectionStart,
-                                 selectionEnd:   selectionEnd)
+                ProToolsSpotView(file: file)
+                    .environmentObject(env.audioPlayer)
                     .padding(16)
             }
         }
         .onAppear {
             env.audioPlayer.load(url: URL(fileURLWithPath: file.fileURL))
+            if env.autoPlayOnSelect { env.audioPlayer.play() }
         }
         .onChange(of: file.id) { _ in
-            selectionStart = nil
-            selectionEnd   = nil
             env.audioPlayer.load(url: URL(fileURLWithPath: file.fileURL))
+            if env.autoPlayOnSelect { env.audioPlayer.play() }
         }
     }
 }

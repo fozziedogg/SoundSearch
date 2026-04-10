@@ -1,18 +1,12 @@
 import SwiftUI
 
 struct WaveformView: View {
-    let url:   URL
-    let mtime: Double
-
-    /// Selected region as fractions of total file duration (0.0–1.0).
-    /// nil = no selection.
-    @Binding var selectionStart: Double?
-    @Binding var selectionEnd:   Double?
+    let url:        URL
+    let mtime:      Double
+    let playOnClick: Bool
 
     @EnvironmentObject var player: AudioPlayer
-    @State private var peaks: [Float] = []
-
-    // Drag state for building a selection
+    @State private var peaks:     [Float] = []
     @State private var dragStart: Double? = nil
 
     var body: some View {
@@ -38,14 +32,13 @@ struct WaveformView: View {
                 .cornerRadius(4)
 
                 // Selected region highlight
-                if let start = selectionStart, let end = selectionEnd, end > start {
+                if let start = player.selectionStart,
+                   let end   = player.selectionEnd, end > start {
                     let w = geo.size.width
                     Rectangle()
                         .fill(Color.accentColor.opacity(0.25))
                         .frame(width: w * CGFloat(end - start))
                         .offset(x: w * CGFloat(start))
-
-                    // In / out handle lines
                     Rectangle()
                         .fill(Color.accentColor)
                         .frame(width: 2)
@@ -78,39 +71,37 @@ struct WaveformView: View {
                         }
                         guard let start = dragStart else { return }
                         if frac >= start {
-                            selectionStart = start
-                            selectionEnd   = frac
+                            player.selectionStart = start
+                            player.selectionEnd   = frac
                         } else {
-                            selectionStart = frac
-                            selectionEnd   = start
+                            player.selectionStart = frac
+                            player.selectionEnd   = start
                         }
                     }
                     .onEnded { val in
                         let w    = geo.size.width
                         let frac = clamp(val.location.x / w)
                         guard let start = dragStart else { return }
-                        // Collapse to nothing if the drag was basically a tap
+                        dragStart = nil
                         let minSelectionPx: CGFloat = 4
                         if abs(val.location.x - val.startLocation.x) < minSelectionPx {
-                            selectionStart = nil
-                            selectionEnd   = nil
+                            // Treat as tap: clear selection, seek, optionally play
+                            player.selectionStart = nil
+                            player.selectionEnd   = nil
                             player.seek(to: frac)
+                            if playOnClick { player.play() }
                         }
-                        dragStart = nil
+                        // Otherwise: selection was committed by the drag — leave it
                     }
             )
             .onTapGesture { location in
-                // Fallback for single tap with no drag — clears selection, seeks
-                selectionStart = nil
-                selectionEnd   = nil
+                player.selectionStart = nil
+                player.selectionEnd   = nil
                 player.seek(to: clamp(location.x / geo.size.width))
+                if playOnClick { player.play() }
             }
             .onAppear { loadPeaks(width: Int(geo.size.width)) }
-            .onChange(of: url) { _ in
-                selectionStart = nil
-                selectionEnd   = nil
-                loadPeaks(width: Int(geo.size.width))
-            }
+            .onChange(of: url) { _ in loadPeaks(width: Int(geo.size.width)) }
         }
     }
 

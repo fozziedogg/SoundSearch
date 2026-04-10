@@ -2,20 +2,23 @@ import Foundation
 import GRDB
 
 extension DatabasePool {
-    /// Creates (or opens) the shared app database and runs all migrations.
-    static func setupShared() throws -> DatabasePool {
-        let appSupport = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ).appendingPathComponent("SFXLibrary", isDirectory: true)
+    /// The directory where the database and its WAL files live.
+    static var databaseDirectory: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("SFXLibrary_database", isDirectory: true)
+    }
 
-        try FileManager.default.createDirectory(at: appSupport,
-                                                 withIntermediateDirectories: true)
+    /// The canonical URL of the SQLite database file.
+    static var databaseURL: URL {
+        databaseDirectory.appendingPathComponent("library.sqlite")
+    }
 
-        let dbURL = appSupport.appendingPathComponent("library.sqlite")
-        let pool  = try DatabasePool(path: dbURL.path)
+    /// Opens (or creates) a database at an arbitrary URL and runs all migrations.
+    static func setup(at url: URL) throws -> DatabasePool {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        let pool  = try DatabasePool(path: url.path)
 
         var migrator = DatabaseMigrator()
         migrator.registerMigration("v1_initial") { db in
@@ -206,5 +209,10 @@ extension DatabasePool {
 
         try migrator.migrate(pool)
         return pool
+    }
+
+    /// Convenience: opens the default library database in ~/Documents/SFXLibrary_database/.
+    static func setupShared() throws -> DatabasePool {
+        try setup(at: databaseURL)
     }
 }

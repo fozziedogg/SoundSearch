@@ -1,27 +1,41 @@
 import Foundation
 import AVFoundation
+import CoreAudio
 import Combine
 
 final class AudioPlayer: ObservableObject {
-    @Published var isPlaying:     Bool   = false
-    @Published var playPosition:  Double = 0   // 0.0 – 1.0
-    @Published var duration:      Double = 0
-    @Published var pitchSemitones: Float = 0
-    @Published var pitchCents:     Float = 0
+    @Published var isPlaying:      Bool   = false
+    @Published var playPosition:   Double = 0   // 0.0 – 1.0
+    @Published var duration:       Double = 0
+    @Published var pitchSemitones: Float  = 0
+    @Published var pitchCents:     Float  = 0
+
+    /// Current waveform selection as fractions of total duration. nil = no selection.
+    @Published var selectionStart: Double? = nil
+    @Published var selectionEnd:   Double? = nil
+
+    /// When true and a selection is active, playback loops the selection.
+    @Published var loopEnabled: Bool = UserDefaults.standard.bool(forKey: "loopEnabled") {
+        didSet { UserDefaults.standard.set(loopEnabled, forKey: "loopEnabled") }
+    }
+
+    /// UID of the currently active CoreAudio output device. Empty string = system default.
+    @Published var currentOutputDeviceUID: String = ""
+
+    /// Sample rate the engine's output node is actually running at (hardware rate).
+    @Published var outputSampleRate: Double = 0
 
     private let engine     = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private let timePitch  = AVAudioUnitTimePitch()
-    private var audioFile: AVAudioFile?
-    private var timer:     AnyCancellable?
+    private var audioFile:  AVAudioFile?
+    private var timer:      AnyCancellable?
     private var currentURL: URL?
 
-    // Tracks which frame we last scheduled from, so updatePosition() can
-    // add this offset to sampleTime and get the real playhead position.
+    // Frame we last scheduled from — added to sampleTime for real position.
     private var seekFrame: AVAudioFramePosition = 0
 
-    // Incremented each time we schedule a new segment; lets the completion
-    // callback tell whether it belongs to the most recent schedule call.
+    // Incremented each schedule call; lets completion callbacks self-invalidate.
     private var scheduleGeneration = 0
 
     init() {
@@ -29,7 +43,44 @@ final class AudioPlayer: ObservableObject {
         engine.attach(timePitch)
         engine.connect(playerNode, to: timePitch,            format: nil)
         engine.connect(timePitch,  to: engine.mainMixerNode, format: nil)
-        try? engine.start()
+
+        // Restore saved output device before starting the engine so we only start once.
+        if let savedUID = UserDefaults.standard.string(forKey: "outputDeviceUID"),
+           !savedUID.isEmpty,
+           let deviceID = AudioDeviceManager.deviceID(forUID: savedUID) {
+            applyOutputDeviceID(deviceID)
+            currentOutputDeviceUID = savedUID
+        }
+
+        startEngine()
+    }
+
+    // MARK: - Output device
+
+    /// Switches audio output to the device identified by `uid`.
+    /// Pass an empty string to revert to the system default.
+    func setOutputDevice(uid: String) {
+        let deviceID: AudioDeviceID?
+        if uid.isEmpty {
+            deviceID = AudioDeviceManager.systemDefaultOutputDeviceID()
+        } else {
+            deviceID = AudioDeviceManager.deviceID(forUID: uid)
+        }
+        guard let deviceID else { return }
+
+        if isPlaying { stop() }
+        engine.stop()
+
+        applyOutputDeviceID(deviceID)
+        currentOutputDeviceUID = uid
+        UserDefaults.standard.set(uid.isEmpty ? nil : uid, forKey: "outputDeviceUID")
+
+        // Reconnect the graph so the engine re-derives its processing format
+        // from the new device's hardware rate (e.g. 44.1 kHz → 48 kHz).
+        // Without this the old format is reused and the HAL bridges the mismatch,
+        // causing glitches.
+        reconnectGraph()
+        startEngine()
     }
 
     // MARK: - Load
@@ -37,7 +88,9 @@ final class AudioPlayer: ObservableObject {
     func load(url: URL) {
         guard url != currentURL else { return }
         stop()
-        currentURL = url
+        currentURL    = url
+        selectionStart = nil
+        selectionEnd   = nil
         do {
             audioFile    = try AVAudioFile(forReading: url)
             duration     = Double(audioFile!.length) / audioFile!.processingFormat.sampleRate
@@ -50,20 +103,33 @@ final class AudioPlayer: ObservableObject {
 
     // MARK: - Playback
 
+    /// Plays from the current position, or from the active selection if one exists.
     func play() {
         guard let file = audioFile else { return }
-        let targetFrame = AVAudioFramePosition(playPosition * Double(file.length))
-        schedule(from: targetFrame)
+        if let start = selectionStart, let end = selectionEnd, end > start {
+            let startFrame = AVAudioFramePosition(start * Double(file.length))
+            let endFrame   = AVAudioFramePosition(end   * Double(file.length))
+            playPosition   = start
+            scheduleSegment(from: startFrame, to: endFrame)
+        } else {
+            let frame = AVAudioFramePosition(playPosition * Double(file.length))
+            scheduleSegment(from: frame, to: nil)
+        }
         playerNode.play()
         isPlaying = true
         startPositionTimer()
     }
 
     func stop() {
-        scheduleGeneration += 1   // invalidate any pending completion callback
+        scheduleGeneration += 1
         playerNode.stop()
         isPlaying = false
         timer?.cancel()
+        seekFrame = 0
+        // Reset playhead to selection start so next play begins at the right place.
+        if let start = selectionStart {
+            playPosition = start
+        }
     }
 
     func togglePlayback() {
@@ -72,15 +138,17 @@ final class AudioPlayer: ObservableObject {
 
     // MARK: - Scrubbing
 
+    /// Seeks to a fractional position. When playing, restarts from that point
+    /// (ignores selection — use play() to respect selection).
     func seek(to fraction: Double) {
         guard let file = audioFile else { return }
-        let clamped = min(max(fraction, 0), 1)
+        let clamped  = min(max(fraction, 0), 1)
         playPosition = clamped
         if isPlaying {
-            scheduleGeneration += 1   // invalidate old completion callback before stop
+            scheduleGeneration += 1
             playerNode.stop()
-            let targetFrame = AVAudioFramePosition(clamped * Double(file.length))
-            schedule(from: targetFrame)
+            let frame = AVAudioFramePosition(clamped * Double(file.length))
+            scheduleSegment(from: frame, to: nil)   // seek ignores selection / looping
             playerNode.play()
         }
     }
@@ -97,28 +165,95 @@ final class AudioPlayer: ObservableObject {
 
     // MARK: - Private
 
-    private func schedule(from frame: AVAudioFramePosition) {
+    /// Disconnects and reconnects the processing graph so AVAudioEngine
+    /// re-derives node formats from the current hardware rate on next start.
+    private func reconnectGraph() {
+        engine.disconnectNodeOutput(playerNode)
+        engine.disconnectNodeOutput(timePitch)
+        engine.connect(playerNode, to: timePitch,            format: nil)
+        engine.connect(timePitch,  to: engine.mainMixerNode, format: nil)
+    }
+
+    /// Starts the engine and captures the hardware output sample rate.
+    private func startEngine() {
+        do {
+            try engine.start()
+            outputSampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
+        } catch {
+            print("[AudioPlayer] engine start error: \(error)")
+            outputSampleRate = 0
+        }
+    }
+
+    /// Sets the CoreAudio output device on the engine's output unit without
+    /// starting or stopping the engine. Call only while the engine is stopped.
+    private func applyOutputDeviceID(_ deviceID: AudioDeviceID) {
+        guard let outputUnit = engine.outputNode.audioUnit else { return }
+        var mutableID = deviceID
+        let err = AudioUnitSetProperty(
+            outputUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &mutableID,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        if err != noErr {
+            print("[AudioPlayer] setOutputDevice error: \(err)")
+        }
+    }
+
+    /// Schedules audio from `startFrame` to `endFrame` (nil = end of file).
+    /// If `endFrame` is non-nil and `loopEnabled` is true at completion, loops the segment.
+    private func scheduleSegment(from startFrame: AVAudioFramePosition,
+                                 to endFrame: AVAudioFramePosition?) {
         guard let file = audioFile else { return }
-        seekFrame = frame
-        let remaining = AVAudioFrameCount(max(0, file.length - frame))
-        guard remaining > 0 else { return }
+        seekFrame = startFrame
+
+        let fileEnd    = file.length
+        let segEnd     = endFrame ?? fileEnd
+        let frameCount = AVAudioFrameCount(max(0, segEnd - startFrame))
+        guard frameCount > 0 else { return }
 
         scheduleGeneration += 1
-        let gen = scheduleGeneration
+        let gen        = scheduleGeneration
+        let loopStart  = startFrame
+        let loopEnd    = endFrame   // nil → no looping
 
         playerNode.scheduleSegment(
             file,
-            startingFrame: frame,
-            frameCount: remaining,
+            startingFrame: startFrame,
+            frameCount: frameCount,
             at: nil,
             completionCallbackType: .dataPlayedBack
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.scheduleGeneration == gen else { return }
-                self.isPlaying    = false
-                self.playPosition = 0
-                self.seekFrame    = 0
-                self.timer?.cancel()
+
+                if let loopEnd, self.loopEnabled, self.selectionStart != nil {
+                    // The player node keeps running between iterations (producing
+                    // silence), so sampleTime never resets. Capture it now so we
+                    // can bias seekFrame: seekFrame + sampleTime == loopStart at
+                    // the boundary, then grows correctly through the new iteration.
+                    let capturedSampleTime: AVAudioFramePosition
+                    if let nt = self.playerNode.lastRenderTime,
+                       let pt = self.playerNode.playerTime(forNodeTime: nt) {
+                        capturedSampleTime = pt.sampleTime
+                    } else {
+                        capturedSampleTime = 0
+                    }
+                    self.scheduleSegment(from: loopStart, to: loopEnd)
+                    // Override the seekFrame set inside scheduleSegment so that
+                    // updatePosition() computes the correct position immediately.
+                    self.seekFrame    = loopStart - capturedSampleTime
+                    self.playPosition = self.selectionStart ?? 0
+                    if !self.playerNode.isPlaying { self.playerNode.play() }
+                } else {
+                    self.isPlaying    = false
+                    self.playPosition = self.selectionStart ?? 0
+                    self.seekFrame    = 0
+                    self.timer?.cancel()
+                }
             }
         }
     }
@@ -135,7 +270,6 @@ final class AudioPlayer: ObservableObject {
               let nodeTime   = playerNode.lastRenderTime,
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime),
               file.length > 0 else { return }
-        // sampleTime counts from the last scheduleSegment call, so add seekFrame
         let frame = seekFrame + playerTime.sampleTime
         playPosition = min(max(Double(frame) / Double(file.length), 0), 1)
     }

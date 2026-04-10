@@ -74,13 +74,7 @@ struct SidebarView: View {
     // MARK: - Actions
 
     private func addFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles          = false
-        panel.canChooseDirectories    = true
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose a folder to scan for audio files"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? env.libraryService.addWatchedFolder(url: url, scanner: env.folderScanner)
+        env.addWatchedFolder()
     }
 
     private func rescan(_ folder: WatchedFolder) {

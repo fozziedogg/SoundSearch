@@ -3,11 +3,12 @@ import AppKit
 
 struct ProToolsSpotView: View {
     let file: AudioFile
-    /// Waveform selection as fractions of file duration. nil = no selection / use whole file.
-    let selectionStart: Double?
-    let selectionEnd:   Double?
 
     @Environment(AppEnvironment.self) var env
+    @EnvironmentObject var player: AudioPlayer
+
+    private var selectionStart: Double? { player.selectionStart }
+    private var selectionEnd:   Double? { player.selectionEnd }
 
     @State private var timecode   = "01:00:00:00"
     @State private var frameRate  = FrameRate.fps25
