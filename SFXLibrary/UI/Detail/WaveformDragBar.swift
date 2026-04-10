@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVFoundation
+import UniformTypeIdentifiers
 
 // MARK: - SwiftUI wrapper
 
@@ -58,6 +59,9 @@ final class DragBarNSView: NSView, NSDraggingSource {
     }
     weak var coordinator: WaveformDragBar.Coordinator?
 
+    /// Strong ref — NSFilePromiseProvider holds its delegate weakly.
+    private var activeDragProvider: WaveformSelectionDragProvider?
+
     // MARK: Drawing
 
     override var isFlipped: Bool { true }
@@ -83,8 +87,6 @@ final class DragBarNSView: NSView, NSDraggingSource {
 
     // MARK: Mouse events
 
-    /// Absorb mouseDown so the event sequence is owned by this view,
-    /// not forwarded to a scroll view ancestor.
     override func mouseDown(with event: NSEvent) { }
 
     override func mouseDragged(with event: NSEvent) {
@@ -92,44 +94,110 @@ final class DragBarNSView: NSView, NSDraggingSource {
               let file   = coordinator.file,
               let player = coordinator.player else { return }
 
-        let sourceURL = URL(fileURLWithPath: file.fileURL)
-        let dragURL: URL
-        if let s = player.selectionStart, let e = player.selectionEnd, e > s,
-           let tmp = try? Self.exportSelection(from: sourceURL, start: s, end: e) {
-            dragURL = tmp
-        } else {
-            dragURL = sourceURL
-        }
+        let sourceURL    = URL(fileURLWithPath: file.fileURL)
+        let selStart     = player.selectionStart
+        let selEnd       = player.selectionEnd
+        let hasSelection = selStart != nil && selEnd != nil && (selEnd ?? 0) > (selStart ?? 0)
 
-        // Write both the legacy type Pro Tools checks on drag-enter and the
-        // modern file-url type for other Cocoa receivers.
-        let item = NSPasteboardItem()
-        item.setPropertyList([dragURL.path],
-                             forType: NSPasteboard.PasteboardType("NSFilenamesPboardType"))
-        item.setString(dragURL.absoluteString, forType: .fileURL)
+        let timeRef: UInt64? = hasSelection
+            ? WaveformSelectionDragProvider.selectionTimeReference(file: file,
+                                                                    selectionStart: selStart ?? 0)
+            : nil
 
-        let draggingItem = NSDraggingItem(pasteboardWriter: item)
-        let icon = NSWorkspace.shared.icon(forFile: dragURL.path)
-        draggingItem.setDraggingFrame(
-            NSRect(origin: .zero, size: NSSize(width: 32, height: 32)),
-            contents: icon
+        let provider = WaveformSelectionDragProvider(
+            sourceURL:      sourceURL,
+            selectionStart: hasSelection ? selStart : nil,
+            selectionEnd:   hasSelection ? selEnd   : nil,
+            timeReference:  timeRef
         )
+        activeDragProvider = provider
 
-        beginDraggingSession(with: [draggingItem], event: event, source: self)
+        // Mirror DragInitiatorNSView exactly: promise provider + bounds frame + nil contents.
+        // NSFilePromiseProvider gives the system a typed file promise; the actual file is
+        // written at drop time so we never block the main thread in mouseDragged.
+        let item = NSDraggingItem(pasteboardWriter: provider.makePromiseProvider())
+        item.setDraggingFrame(bounds, contents: nil)
+        beginDraggingSession(with: [item], event: event, source: self)
     }
 
     // MARK: NSDraggingSource
 
     func draggingSession(_ session: NSDraggingSession,
-                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        .copy
+                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .copy }
+
+    func draggingSession(_ session: NSDraggingSession,
+                         endedAt screenPoint: NSPoint,
+                         operation: NSDragOperation) {
+        activeDragProvider = nil
+    }
+}
+
+// MARK: - File promise provider
+
+final class WaveformSelectionDragProvider: NSObject, NSFilePromiseProviderDelegate {
+
+    private let sourceURL:      URL
+    private let selectionStart: Double?
+    private let selectionEnd:   Double?
+    private let timeReference:  UInt64?
+
+    init(sourceURL: URL, selectionStart: Double?, selectionEnd: Double?, timeReference: UInt64?) {
+        self.sourceURL      = sourceURL
+        self.selectionStart = selectionStart
+        self.selectionEnd   = selectionEnd
+        self.timeReference  = timeReference
+        super.init()
     }
 
-    // MARK: Selection export
+    func makePromiseProvider() -> NSFilePromiseProvider {
+        let ext  = sourceURL.pathExtension.lowercased()
+        let type = (ext == "aiff" || ext == "aif") ? UTType.aiff.identifier : UTType.wav.identifier
+        return NSFilePromiseProvider(fileType: type, delegate: self)
+    }
 
-    private static func exportSelection(from sourceURL: URL,
-                                        start: Double,
-                                        end: Double) throws -> URL {
+    // MARK: NSFilePromiseProviderDelegate
+
+    func filePromiseProvider(_ provider: NSFilePromiseProvider,
+                              fileNameForType fileType: String) -> String {
+        selectionStart != nil
+            ? "Selection_" + sourceURL.lastPathComponent
+            : sourceURL.lastPathComponent
+    }
+
+    func filePromiseProvider(_ provider: NSFilePromiseProvider,
+                              writePromiseTo destURL: URL) async throws {
+        let fileURL: URL
+
+        if let s = selectionStart, let e = selectionEnd, e > s {
+            let exported = try Self.exportSelection(from: sourceURL, start: s, end: e)
+            if let ref = timeReference,
+               let patched = try? SpotFileBuilder.buildSpotFile(source: exported, sampleOffset: ref) {
+                fileURL = patched
+            } else {
+                fileURL = exported
+            }
+        } else {
+            fileURL = sourceURL
+        }
+
+        if FileManager.default.fileExists(atPath: destURL.path) {
+            try FileManager.default.removeItem(at: destURL)
+        }
+        try FileManager.default.copyItem(at: fileURL, to: destURL)
+    }
+
+    // MARK: Helpers
+
+    static func selectionTimeReference(file: AudioFile, selectionStart: Double) -> UInt64? {
+        let refLow  = UInt32(truncatingIfNeeded: file.bwfTimeRefLow)
+        let refHigh = UInt32(truncatingIfNeeded: file.bwfTimeRefHigh)
+        let baseRef = (UInt64(refHigh) << 32) | UInt64(refLow)
+        guard baseRef > 0, let sr = file.sampleRate, let dur = file.duration else { return nil }
+        let startSamples = UInt64(max(0.0, selectionStart * Double(sr) * dur))
+        return baseRef + startSamples
+    }
+
+    private static func exportSelection(from sourceURL: URL, start: Double, end: Double) throws -> URL {
         let src        = try AVAudioFile(forReading: sourceURL)
         let startFrame = AVAudioFramePosition(start * Double(src.length))
         let endFrame   = AVAudioFramePosition(end   * Double(src.length))
@@ -142,10 +210,10 @@ final class DragBarNSView: NSView, NSDraggingSource {
         else { throw ExportError.bufferAllocationFailed }
         try src.read(into: buffer, frameCount: frameCount)
 
-        let dragDir = FileManager.default.temporaryDirectory
+        let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("SFXLibraryDrag", isDirectory: true)
-        try FileManager.default.createDirectory(at: dragDir, withIntermediateDirectories: true)
-        let dest = dragDir.appendingPathComponent("Selection_" + sourceURL.lastPathComponent)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent("Selection_" + sourceURL.lastPathComponent)
         if FileManager.default.fileExists(atPath: dest.path) {
             try FileManager.default.removeItem(at: dest)
         }

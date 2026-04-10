@@ -85,9 +85,8 @@ struct WaveformView: View {
                         dragStart = nil
                         let minSelectionPx: CGFloat = 4
                         if abs(val.location.x - val.startLocation.x) < minSelectionPx {
-                            // Treat as tap: clear selection, seek, optionally play
-                            player.selectionStart = nil
-                            player.selectionEnd   = nil
+                            // Treat as tap: seek without clearing the selection so the
+                            // user can preview position while keeping their selection intact.
                             player.seek(to: frac)
                             if playOnClick { player.play() }
                         }
@@ -95,8 +94,8 @@ struct WaveformView: View {
                     }
             )
             .onTapGesture { location in
-                player.selectionStart = nil
-                player.selectionEnd   = nil
+                // Move the playhead without clearing the selection — the user may
+                // be previewing a position before dragging the selection to PT.
                 player.seek(to: clamp(location.x / geo.size.width))
                 if playOnClick { player.play() }
             }

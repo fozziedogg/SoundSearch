@@ -13,6 +13,7 @@ struct MainWindowView: View {
                 Group {
                     if let file = selectedFile {
                         DetailView(file: file)
+                            .id(file.id)
                     } else {
                         Text("Select a file")
                             .foregroundColor(.secondary)
