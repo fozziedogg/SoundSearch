@@ -9,21 +9,15 @@ struct WaveformDragBar: NSViewRepresentable {
     let file: AudioFile
     @EnvironmentObject var player: AudioPlayer
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
     func makeNSView(context: Context) -> DragBarNSView {
-        let v = DragBarNSView()
-        v.coordinator = context.coordinator
-        return v
+        DragBarNSView()
     }
 
     func updateNSView(_ nsView: DragBarNSView, context: Context) {
-        context.coordinator.file   = file
-        context.coordinator.player = player
-        nsView.label = labelText
+        nsView.file   = file
+        nsView.player = player
+        nsView.label  = labelText
     }
-
-    // MARK: - Label
 
     private var labelText: String {
         if hasSelection, let s = player.selectionStart, let e = player.selectionEnd {
@@ -41,30 +35,27 @@ struct WaveformDragBar: NSViewRepresentable {
         guard let s = player.selectionStart, let e = player.selectionEnd else { return false }
         return e > s
     }
-
-    // MARK: - Coordinator
-
-    final class Coordinator {
-        var file:   AudioFile?
-        var player: AudioPlayer?
-    }
 }
 
 // MARK: - NSView
 
+/// Pure-AppKit drag bar. Drag detection runs entirely inside mouseDown via
+/// window.nextEvent(matching:), bypassing SwiftUI's event routing entirely.
+/// NSViewRepresentable views cannot rely on mouseDragged being forwarded by
+/// SwiftUI's NSHostingView once a DragGesture is present anywhere in the tree.
 final class DragBarNSView: NSView, NSDraggingSource {
+
+    var file:   AudioFile?
+    var player: AudioPlayer?
 
     var label: String = "Drag to PT Timeline" {
         didSet { needsDisplay = true }
     }
-    weak var coordinator: WaveformDragBar.Coordinator?
 
     /// Strong ref — NSFilePromiseProvider holds its delegate weakly.
-    private var activeDragProvider: WaveformSelectionDragProvider?
+    private var activeDragProvider: DragBarFileProvider?
 
     // MARK: Drawing
-
-    override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
@@ -80,31 +71,52 @@ final class DragBarNSView: NSView, NSDraggingSource {
             .foregroundColor: NSColor.controlAccentColor
         ]
         let str = NSAttributedString(string: label, attributes: attrs)
-        let size = str.size()
-        let y = (bounds.height - size.height) / 2
-        str.draw(at: NSPoint(x: 8, y: y))
+        let sz  = str.size()
+        str.draw(at: NSPoint(x: 8, y: (bounds.height - sz.height) / 2))
     }
 
-    // MARK: Mouse events
+    // MARK: Mouse
 
-    override func mouseDown(with event: NSEvent) { }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func mouseDragged(with event: NSEvent) {
-        guard let coordinator,
-              let file   = coordinator.file,
-              let player = coordinator.player else { return }
+    override func mouseDown(with event: NSEvent) {
+        guard let file, let player, let window else { return }
 
+        // Spin a local AppKit event loop until the mouse moves enough to be a
+        // drag or the button is released. This runs entirely in AppKit and is
+        // unaffected by SwiftUI's NSHostingView event routing.
+        let threshold: CGFloat = 9   // px² (= 3 px euclidean)
+        var dragEvent: NSEvent?
+
+        eventLoop: while true {
+            guard let e = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
+            switch e.type {
+            case .leftMouseUp:
+                break eventLoop
+            case .leftMouseDragged:
+                if e.deltaX * e.deltaX + e.deltaY * e.deltaY >= threshold {
+                    dragEvent = e
+                    break eventLoop
+                }
+            default:
+                break
+            }
+        }
+
+        guard let dragEvent else { return }
+
+        // Build the provider
         let sourceURL    = URL(fileURLWithPath: file.fileURL)
         let selStart     = player.selectionStart
         let selEnd       = player.selectionEnd
         let hasSelection = selStart != nil && selEnd != nil && (selEnd ?? 0) > (selStart ?? 0)
 
         let timeRef: UInt64? = hasSelection
-            ? WaveformSelectionDragProvider.selectionTimeReference(file: file,
-                                                                    selectionStart: selStart ?? 0)
+            ? DragBarFileProvider.selectionTimeReference(file: file,
+                                                         selectionStart: selStart ?? 0)
             : nil
 
-        let provider = WaveformSelectionDragProvider(
+        let provider = DragBarFileProvider(
             sourceURL:      sourceURL,
             selectionStart: hasSelection ? selStart : nil,
             selectionEnd:   hasSelection ? selEnd   : nil,
@@ -112,12 +124,9 @@ final class DragBarNSView: NSView, NSDraggingSource {
         )
         activeDragProvider = provider
 
-        // Mirror DragInitiatorNSView exactly: promise provider + bounds frame + nil contents.
-        // NSFilePromiseProvider gives the system a typed file promise; the actual file is
-        // written at drop time so we never block the main thread in mouseDragged.
         let item = NSDraggingItem(pasteboardWriter: provider.makePromiseProvider())
         item.setDraggingFrame(bounds, contents: nil)
-        beginDraggingSession(with: [item], event: event, source: self)
+        beginDraggingSession(with: [item], event: dragEvent, source: self)
     }
 
     // MARK: NSDraggingSource
@@ -134,7 +143,7 @@ final class DragBarNSView: NSView, NSDraggingSource {
 
 // MARK: - File promise provider
 
-final class WaveformSelectionDragProvider: NSObject, NSFilePromiseProviderDelegate {
+final class DragBarFileProvider: NSObject, NSFilePromiseProviderDelegate {
 
     private let sourceURL:      URL
     private let selectionStart: Double?
@@ -197,7 +206,7 @@ final class WaveformSelectionDragProvider: NSObject, NSFilePromiseProviderDelega
         return baseRef + startSamples
     }
 
-    private static func exportSelection(from sourceURL: URL, start: Double, end: Double) throws -> URL {
+    static func exportSelection(from sourceURL: URL, start: Double, end: Double) throws -> URL {
         let src        = try AVAudioFile(forReading: sourceURL)
         let startFrame = AVAudioFramePosition(start * Double(src.length))
         let endFrame   = AVAudioFramePosition(end   * Double(src.length))

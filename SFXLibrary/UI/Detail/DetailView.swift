@@ -5,49 +5,54 @@ struct DetailView: View {
     let file: AudioFile
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                // Waveform + player
-                WaveformView(url: URL(fileURLWithPath: file.fileURL),
-                             mtime: file.mtime,
-                             playOnClick: env.playOnWaveformClick)
-                    .environmentObject(env.audioPlayer)
-                    .frame(height: 80)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 16)
+        VStack(alignment: .leading, spacing: 0) {
+            // Fixed top section — must NOT be inside a ScrollView or the
+            // NSView-based drag bar loses its mouseDragged events to SwiftUI's
+            // scroll gesture recognizers.
+            WaveformView(url: URL(fileURLWithPath: file.fileURL),
+                         mtime: file.mtime,
+                         playOnClick: env.playOnWaveformClick)
+                .environmentObject(env.audioPlayer)
+                .frame(height: 80)
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
 
-                WaveformDragBar(file: file)
-                    .environmentObject(env.audioPlayer)
-                    .frame(height: 26)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
+            WaveformDragBar(file: file)
+                .environmentObject(env.audioPlayer)
+                .frame(height: 26)
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
 
-                PlayerControlsView()
-                    .environmentObject(env.audioPlayer)
-                    .environment(env)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+            PlayerControlsView()
+                .environmentObject(env.audioPlayer)
+                .environment(env)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
 
-                PitchControlView()
-                    .environmentObject(env.audioPlayer)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+            PitchControlView()
+                .environmentObject(env.audioPlayer)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
 
-                Divider()
+            Divider()
 
-                MetadataFormView(file: file)
-                    .padding(16)
+            // Scrollable metadata section
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    MetadataFormView(file: file)
+                        .padding(16)
 
-                Divider()
+                    Divider()
 
-                TechnicalInfoView(file: file)
-                    .padding(16)
+                    TechnicalInfoView(file: file)
+                        .padding(16)
 
-                Divider()
+                    Divider()
 
-                ProToolsSpotView(file: file)
-                    .environmentObject(env.audioPlayer)
-                    .padding(16)
+                    ProToolsSpotView(file: file)
+                        .environmentObject(env.audioPlayer)
+                        .padding(16)
+                }
             }
         }
         .onAppear {
