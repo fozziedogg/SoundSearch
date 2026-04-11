@@ -31,6 +31,16 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(playOnWaveformClick, forKey: "playOnWaveformClick") }
     }
 
+    var dragExportMode: DragExportMode = DragExportMode(rawValue: UserDefaults.standard.integer(forKey: "dragExportMode")) ?? .selectionOnly {
+        didSet { UserDefaults.standard.set(dragExportMode.rawValue, forKey: "dragExportMode") }
+    }
+    var dragHandleSeconds: Double = {
+        let v = UserDefaults.standard.double(forKey: "dragHandleSeconds")
+        return v > 0 ? v : 1.0
+    }() {
+        didSet { UserDefaults.standard.set(dragHandleSeconds, forKey: "dragHandleSeconds") }
+    }
+
     @ObservationIgnored private var db: DatabasePool
     @ObservationIgnored private var filesObservation: AnyDatabaseCancellable?
     @ObservationIgnored private var foldersObservation: AnyDatabaseCancellable?

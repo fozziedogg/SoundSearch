@@ -2,11 +2,26 @@ import SwiftUI
 import AVFoundation
 import UniformTypeIdentifiers
 
+// MARK: - Export mode
+
+enum DragExportMode: Int, CaseIterable {
+    case selectionOnly = 0
+    case wholeFile     = 1
+
+    var label: String {
+        switch self {
+        case .selectionOnly: return "Selection only"
+        case .wholeFile:     return "Whole file"
+        }
+    }
+}
+
 // MARK: - View
 
 struct WaveformDragBar: View {
     let file: AudioFile
     @EnvironmentObject var player: AudioPlayer
+    @Environment(AppEnvironment.self) var env
 
     var body: some View {
         dragBarShape
@@ -29,13 +44,23 @@ struct WaveformDragBar: View {
     }
 
     private var labelText: String {
-        if hasSelection, let s = player.selectionStart, let e = player.selectionEnd {
-            let dur = (e - s) * player.duration
-            return "⠿  Drag to PT Timeline  •  Selection  \(fmt(s * player.duration)) – \(fmt(e * player.duration))  (\(fmt(dur)))"
+        switch env.dragExportMode {
+        case .wholeFile:
+            if hasSelection, let s = player.selectionStart {
+                return "⠿  Drag to PT Timeline  •  Full file, spot at \(fmt(s * player.duration))"
+            }
+            return player.duration > 0
+                ? "⠿  Drag to PT Timeline  •  Full file  (\(fmt(player.duration)))"
+                : "⠿  Drag to PT Timeline"
+        case .selectionOnly:
+            if hasSelection, let s = player.selectionStart, let e = player.selectionEnd {
+                let dur = (e - s) * player.duration
+                return "⠿  Drag to PT Timeline  •  Selection  \(fmt(s * player.duration)) – \(fmt(e * player.duration))  (\(fmt(dur)))"
+            }
+            return player.duration > 0
+                ? "⠿  Drag to PT Timeline  •  Full file  (\(fmt(player.duration)))"
+                : "⠿  Drag to PT Timeline"
         }
-        return player.duration > 0
-            ? "⠿  Drag to PT Timeline  •  Full file  (\(fmt(player.duration)))"
-            : "⠿  Drag to PT Timeline"
     }
 
     private var hasSelection: Bool {
@@ -56,7 +81,25 @@ struct WaveformDragBar: View {
         // Build the file to deliver synchronously (in-process AVAudioFile copy, ~< 50 ms).
         let deliverURL: URL
 
-        if hasSelection, let s = selStart, let e = selEnd {
+        if env.dragExportMode == .wholeFile {
+            if hasSelection, let s = selStart {
+                // Deliver the original file with BEXT patched to the selection timecode.
+                // The full file audio is available for trimming in PT.
+                let timeRef = DragBarHelper.selectionTimeReference(file: file, selectionStart: s)
+                if let ref = timeRef,
+                   let patched = try? SpotFileBuilder.buildSpotFile(source: sourceURL,
+                                                                     sampleOffset: ref) {
+                    deliverURL = patched
+                } else {
+                    deliverURL = sourceURL
+                }
+            } else {
+                deliverURL = sourceURL
+            }
+        } else if !hasSelection {
+            deliverURL = sourceURL
+        } else if let s = selStart, let e = selEnd {
+            print("[Drag] exporting \(sourceURL.lastPathComponent) sel=\(String(format:"%.3f",s))–\(String(format:"%.3f",e))")
             let exported: URL?
             do {
                 exported = try DragBarHelper.exportSelection(from: sourceURL, start: s, end: e)
@@ -68,7 +111,8 @@ struct WaveformDragBar: View {
             if let exported {
                 let timeRef = DragBarHelper.selectionTimeReference(file: file, selectionStart: s)
                 if let ref = timeRef,
-                   let patched = try? SpotFileBuilder.buildSpotFile(source: exported, sampleOffset: ref) {
+                   let patched = try? SpotFileBuilder.buildSpotFile(source: exported,
+                                                                     sampleOffset: ref) {
                     deliverURL = patched
                 } else {
                     deliverURL = exported
@@ -82,9 +126,6 @@ struct WaveformDragBar: View {
 
         // registerObject(url as NSURL) puts public.file-url on the pasteboard —
         // the type Pro Tools checks for in draggingEntered:.
-        // NSItemProvider(contentsOf:) was wrong: it puts the audio *data* on the
-        // pasteboard keyed by UTI (e.g. com.microsoft.waveform-audio), which PT
-        // doesn't check for. PT needs the file *path*, not inline audio bytes.
         let provider = NSItemProvider()
         provider.registerObject(deliverURL as NSURL, visibility: .all)
         return provider
@@ -124,7 +165,15 @@ enum DragBarHelper {
         if FileManager.default.fileExists(atPath: dest.path) {
             try FileManager.default.removeItem(at: dest)
         }
-        let out = try AVAudioFile(forWriting: dest, settings: src.fileFormat.settings)
+        // Strip AVLinearPCMIsBigEndianKey so AVAudioFile infers byte order from the
+        // file extension (AIFF = big-endian, WAV = little-endian). Passing the key
+        // explicitly from fileFormat.settings can cause write failures on AIFF files.
+        // Force interleaved output — processingFormat is non-interleaved but AVAudioFile
+        // converts automatically; a non-interleaved container setting can cause failures.
+        var writeSettings = src.fileFormat.settings
+        writeSettings[AVLinearPCMIsBigEndianKey] = nil
+        writeSettings[AVLinearPCMIsNonInterleaved] = false
+        let out = try AVAudioFile(forWriting: dest, settings: writeSettings)
         try out.write(from: buffer)
         return dest
     }
