@@ -30,7 +30,10 @@ struct SpotFileBuilder {
             .appendingPathComponent("SFXLibrarySpot", isDirectory: true)
         try FileManager.default.createDirectory(at: spotDir,
                                                  withIntermediateDirectories: true)
-        let destURL = spotDir.appendingPathComponent(source.lastPathComponent)
+        let safeName = source.lastPathComponent
+            .components(separatedBy: CharacterSet(charactersIn: ":/\\*?\"<>|"))
+            .joined(separator: "-")
+        let destURL = spotDir.appendingPathComponent(safeName)
         try patched.write(to: destURL, options: .atomic)
         return destURL
     }

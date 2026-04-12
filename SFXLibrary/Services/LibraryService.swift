@@ -31,7 +31,7 @@ final class LibraryService {
             id: nil,
             fileURL:    url.path,
             bookmarkData: nil,
-            filename:   url.lastPathComponent,
+            filename:   Self.ptSafe(url.lastPathComponent),
             fileSize:   size,
             mtime:      mtimeDouble,
             format:     url.pathExtension.uppercased(),
@@ -82,7 +82,7 @@ final class LibraryService {
                 if let bextChunk = chunks.first(where: { $0.fourCC == "bext" }) {
                     let chunkData = data.subdata(in: bextChunk.offset..<bextChunk.offset + bextChunk.size)
                     if let bext = try? BEXTChunk.parse(from: chunkData) {
-                        file.bwfDescription  = bext.description
+                        file.bwfDescription  = Self.ptSafe(bext.description)
                         file.bwfOriginator   = bext.originator
                         file.bwfTimeRefLow   = Int64(bext.timeReferenceLow)
                         file.bwfTimeRefHigh  = Int64(bext.timeReferenceHigh)
@@ -136,5 +136,13 @@ final class LibraryService {
         Task.detached(priority: .utility) {
             await scanner.rescan(path: path)
         }
+    }
+
+    // MARK: - Helpers
+
+    /// Replaces characters illegal in Pro Tools session filenames with dashes.
+    private static func ptSafe(_ s: String) -> String {
+        s.components(separatedBy: CharacterSet(charactersIn: ":/\\*?\"<>|"))
+         .joined(separator: "-")
     }
 }

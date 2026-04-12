@@ -49,28 +49,16 @@ struct AudioSettingsView: View {
                     }
                 }
                 .pickerStyle(.radioGroup)
-
-                HStack {
-                    let handlesActive = env.dragExportMode == .selectionWithHandles
-                    Text("Handle length")
-                        .opacity(handlesActive ? 1 : 0.35)
-                    Slider(value: $bEnv.dragHandleSeconds, in: 0.1...10.0, step: 0.1)
-                        .disabled(!handlesActive)
-                    Text(String(format: "%.1fs", env.dragHandleSeconds))
-                        .frame(width: 40, alignment: .trailing)
-                        .font(.system(size: 11, design: .monospaced))
-                        .opacity(handlesActive ? 1 : 0.35)
-                }
             } header: {
                 Text("Pro Tools Drag")
             } footer: {
-                Text("Controls what audio is delivered when dragging a waveform selection to the Pro Tools timeline. 'Selection + handles' pads extra audio before and after the selection. 'Whole file' ignores the selection and always delivers the original file.")
+                Text("Controls what audio is delivered when dragging a waveform selection to the Pro Tools timeline. 'Whole file' delivers the original file with the BEXT timecode set to the selection start, so PT spots the clip at the right position and you can trim to taste.")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 360)
+        .frame(width: 460, height: 310)
         .onAppear { refreshDevices() }
     }
 
