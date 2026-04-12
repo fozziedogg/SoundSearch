@@ -70,31 +70,6 @@ struct WaveformDragBar: View {
 
     private func fmt(_ t: Double) -> String { String(format: "%.3fs", t) }
 
-    /// If `url`'s filename contains characters illegal in Pro Tools, copies the
-    /// file to a temp location with a sanitized name and returns that URL.
-    /// Otherwise returns `url` unchanged.
-    private static func ptSafeDeliverURL(_ url: URL) -> URL {
-        let illegal = CharacterSet(charactersIn: ":/\\*?\"<>|")
-        let original = url.lastPathComponent
-        let clean = original
-            .components(separatedBy: illegal)
-            .joined(separator: "-")
-        guard clean != original else { return url }
-
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("SFXLibraryDeliver", isDirectory: true)
-        guard (try? FileManager.default.createDirectory(at: dir,
-                                                        withIntermediateDirectories: true)) != nil
-        else { return url }
-
-        let dest = dir.appendingPathComponent(clean)
-        if FileManager.default.fileExists(atPath: dest.path) {
-            try? FileManager.default.removeItem(at: dest)
-        }
-        guard (try? FileManager.default.copyItem(at: url, to: dest)) != nil else { return url }
-        return dest
-    }
-
     // MARK: - Drag item provider
 
     private func makeItemProvider() -> NSItemProvider {
@@ -103,13 +78,10 @@ struct WaveformDragBar: View {
         let selEnd       = player.selectionEnd
         let hasSelection = selStart != nil && selEnd != nil && (selEnd ?? 0) > (selStart ?? 0)
 
-        // Build the file to deliver synchronously (in-process AVAudioFile copy, ~< 50 ms).
         let deliverURL: URL
 
         if env.dragExportMode == .wholeFile {
             if hasSelection, let s = selStart {
-                // Deliver the original file with BEXT patched to the selection timecode.
-                // The full file audio is available for trimming in PT.
                 let timeRef = DragBarHelper.selectionTimeReference(file: file, selectionStart: s)
                 if let ref = timeRef,
                    let patched = try? SpotFileBuilder.buildSpotFile(source: sourceURL,
@@ -134,7 +106,6 @@ struct WaveformDragBar: View {
                 let safeName = baseName
                     .components(separatedBy: CharacterSet.alphanumerics.union(.init(charactersIn: " _-")).inverted)
                     .joined(separator: "_")
-                print("[Drag] destName=\(safeName)")
                 exported = try DragBarHelper.exportSelection(from: sourceURL, start: s, end: e,
                                                              destName: safeName)
                 if let exported {
@@ -164,16 +135,34 @@ struct WaveformDragBar: View {
             deliverURL = sourceURL
         }
 
-        // Ensure the delivered filename contains no characters illegal in Pro Tools
-        // (colons, slashes, etc.). If the name is already clean this is a no-op.
-        let finalURL = WaveformDragBar.ptSafeDeliverURL(deliverURL)
+        // Sanitise filename for Pro Tools (no colons, slashes, etc.)
+        let finalURL = ptSafeURL(deliverURL)
         print("[Drag] delivering → \(finalURL.path)")
 
-        // registerObject(url as NSURL) puts public.file-url on the pasteboard —
-        // the type Pro Tools checks for in draggingEntered:.
         let provider = NSItemProvider()
         provider.registerObject(finalURL as NSURL, visibility: .all)
         return provider
+    }
+
+    /// Copies the file to a temp location with a PT-legal filename if needed.
+    private func ptSafeURL(_ url: URL) -> URL {
+        let illegal = CharacterSet(charactersIn: ":/\\*?\"<>|")
+        let original = url.lastPathComponent
+        let clean = original.components(separatedBy: illegal).joined(separator: "-")
+        guard clean != original else { return url }
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SFXLibraryDeliver", isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: dir,
+                                                        withIntermediateDirectories: true)) != nil
+        else { return url }
+
+        let dest = dir.appendingPathComponent(clean)
+        if FileManager.default.fileExists(atPath: dest.path) {
+            try? FileManager.default.removeItem(at: dest)
+        }
+        guard (try? FileManager.default.copyItem(at: url, to: dest)) != nil else { return url }
+        return dest
     }
 }
 
@@ -200,7 +189,7 @@ enum DragBarHelper {
             try FileManager.default.removeItem(at: dest)
         }
 
-        // For WAV: slice raw PCM bytes directly — no re-encoding, exact format preserved.
+        // WAV fast path: slice raw PCM, preserving exact format.
         if sourceURL.pathExtension.lowercased() == "wav",
            let fileData  = try? Data(contentsOf: sourceURL, options: .mappedIfSafe),
            let chunks    = try? RIFFParser.chunks(in: fileData),
@@ -220,10 +209,9 @@ enum DragBarHelper {
             guard endByte <= fileData.count else { throw ExportError.emptySelection }
             let sliced = fileData.subdata(in: startByte..<endByte)
 
-            // Build RIFF/WAVE: fmt chunk verbatim + new data chunk.
             var out = Data()
             out += "RIFF".data(using: .isoLatin1)!
-            out += Data(count: 4)                           // RIFF size — filled below
+            out += Data(count: 4)                           // filled below
             out += "WAVE".data(using: .isoLatin1)!
             let fmtEnd = fmtChunk.offset + fmtChunk.size + (fmtChunk.size % 2)
             out += fileData.subdata(in: (fmtChunk.offset - 8)..<fmtEnd)
@@ -238,7 +226,7 @@ enum DragBarHelper {
             return dest
         }
 
-        // Fallback for AIFF and non-standard WAV: re-encode via AVAudioFile.
+        // Fallback: re-encode via AVAudioFile (AIFF and non-standard WAV).
         let src        = try AVAudioFile(forReading: sourceURL)
         let startFrame = AVAudioFramePosition(start * Double(src.length))
         let endFrame   = AVAudioFramePosition(end   * Double(src.length))
