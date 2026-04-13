@@ -1,21 +1,22 @@
 import SwiftUI
 
-struct DetailView: View {
+// MARK: - Preview panel (waveform + playback controls)
+
+struct PreviewView: View {
     @Environment(AppEnvironment.self) var env
     let file: AudioFile
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Fixed top section — must NOT be inside a ScrollView or the
-            // NSView-based drag bar loses its mouseDragged events to SwiftUI's
-            // scroll gesture recognizers.
+            PanelHeader(title: "Preview")
+
             WaveformView(url: URL(fileURLWithPath: file.fileURL),
                          mtime: file.mtime,
                          playOnClick: env.playOnWaveformClick)
                 .environmentObject(env.audioPlayer)
                 .frame(height: 80)
                 .padding(.horizontal, 16)
-                .padding(.top, 16)
+                .padding(.top, 12)
                 .id(file.id)
 
             WaveformDragBar(file: file)
@@ -33,28 +34,9 @@ struct DetailView: View {
             PitchControlView()
                 .environmentObject(env.audioPlayer)
                 .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.bottom, 12)
 
-            Divider()
-
-            // Scrollable metadata section
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    MetadataFormView(file: file)
-                        .padding(16)
-
-                    Divider()
-
-                    TechnicalInfoView(file: file)
-                        .padding(16)
-
-                    Divider()
-
-                    ProToolsSpotView(file: file)
-                        .environmentObject(env.audioPlayer)
-                        .padding(16)
-                }
-            }
+            Spacer(minLength: 0)
         }
         .onAppear {
             env.audioPlayer.load(url: URL(fileURLWithPath: file.fileURL))
@@ -64,6 +46,83 @@ struct DetailView: View {
             env.audioPlayer.load(url: URL(fileURLWithPath: newURL))
             if env.autoPlayOnSelect { env.audioPlayer.play() }
         }
+    }
+}
+
+// MARK: - File Info panel (metadata + technical + Pro Tools spot)
+
+struct FileInfoView: View {
+    @Environment(AppEnvironment.self) var env
+    let file: AudioFile
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header with expand/collapse toggle
+            HStack {
+                Text("File Info")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(1.5)
+                Spacer()
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(isExpanded ? "Hide File Info" : "Show File Info")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.25))
+
+            if isExpanded {
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        MetadataFormView(file: file)
+                            .padding(16)
+
+                        Divider()
+
+                        TechnicalInfoView(file: file)
+                            .padding(16)
+
+                        Divider()
+
+                        ProToolsSpotView(file: file)
+                            .environmentObject(env.audioPlayer)
+                            .padding(16)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Shared panel header
+
+struct PanelHeader: View {
+    let title: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+                .tracking(1.5)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.25))
     }
 }
 

@@ -99,11 +99,7 @@ struct WaveformDragBar: View {
             print("[Drag] exporting \(sourceURL.lastPathComponent) sel=\(String(format:"%.3f",s))–\(String(format:"%.3f",e))")
             let exported: URL?
             do {
-                let desc = file.bwfDescription.trimmingCharacters(in: .whitespaces)
-                let baseName = desc.isEmpty
-                    ? sourceURL.deletingPathExtension().lastPathComponent
-                    : desc
-                let safeName = baseName
+                let safeName = sourceURL.deletingPathExtension().lastPathComponent
                     .components(separatedBy: CharacterSet.alphanumerics.union(.init(charactersIn: " _-")).inverted)
                     .joined(separator: "_")
                 exported = try DragBarHelper.exportSelection(from: sourceURL, start: s, end: e,
@@ -184,7 +180,7 @@ enum DragBarHelper {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("SFXLibraryDrag", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dest = dir.appendingPathComponent("Selection_\(destName).\(sourceURL.pathExtension)")
+        let dest = dir.appendingPathComponent("\(destName).\(sourceURL.pathExtension)")
         if FileManager.default.fileExists(atPath: dest.path) {
             try FileManager.default.removeItem(at: dest)
         }

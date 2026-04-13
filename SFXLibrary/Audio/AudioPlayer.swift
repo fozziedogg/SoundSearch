@@ -270,7 +270,14 @@ final class AudioPlayer: ObservableObject {
               let nodeTime   = playerNode.lastRenderTime,
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime),
               file.length > 0 else { return }
-        let frame = seekFrame + playerTime.sampleTime
+
+        // playerTime.sampleTime is in the player node's output format rate (= hardware rate),
+        // but seekFrame and file.length are in the file's native sample rate.
+        // Scale so all three are in the same unit before dividing.
+        let rateRatio = file.fileFormat.sampleRate / playerTime.sampleRate
+        let scaledSampleTime = AVAudioFramePosition(Double(playerTime.sampleTime) * rateRatio)
+
+        let frame = seekFrame + scaledSampleTime
         playPosition = min(max(Double(frame) / Double(file.length), 0), 1)
     }
 }

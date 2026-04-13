@@ -1,73 +1,185 @@
 import SwiftUI
+import AppKit
 
 struct WaveformView: View {
-    let url:        URL
-    let mtime:      Double
+    let url:         URL
+    let mtime:       Double
     let playOnClick: Bool
 
     @EnvironmentObject var player: AudioPlayer
-    @State private var peaks:     [Float] = []
+
+    // Waveform data — one sub-array per channel
+    @State private var peaks: [[Float]] = []
+
+    // Zoom state
+    @State private var zoomLevel:    Double = 1.0   // 1.0 = full file visible
+    @State private var windowStart:  Double = 0.0   // file-fraction of left edge
+    @State private var pinchBase:    Double? = nil   // zoom level captured at pinch start
+
+    // Selection drag
     @State private var dragStart: Double? = nil
+
+    // MARK: - Zoom geometry
+
+    private var windowSize: Double { 1.0 / max(zoomLevel, 1.0) }
+    private var windowEnd:  Double { min(windowStart + windowSize, 1.0) }
+
+    /// File fraction → view fraction (may be outside 0…1 when off-screen)
+    private func toViewFrac(_ f: Double) -> Double { (f - windowStart) / windowSize }
+
+    /// View fraction → file fraction (clamped to 0…1)
+    private func toFileFrac(_ v: Double) -> Double {
+        min(max(windowStart + v * windowSize, 0), 1)
+    }
+
+    // MARK: - Body
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
 
-                // Waveform bars
+                // ── Waveform canvas ──────────────────────────────────────────
                 Canvas { ctx, size in
-                    guard !peaks.isEmpty else { return }
-                    let step = size.width / CGFloat(peaks.count)
-                    let midY = size.height / 2
-                    var path = Path()
-                    for (i, peak) in peaks.enumerated() {
-                        let x   = CGFloat(i) * step + step / 2
-                        let amp = CGFloat(peak) * (size.height / 2) * 0.9
-                        path.move(to:    CGPoint(x: x, y: midY - amp))
-                        path.addLine(to: CGPoint(x: x, y: midY + amp))
+                    guard !peaks.isEmpty, let first = peaks.first, !first.isEmpty else { return }
+                    let n            = first.count
+                    let startIdx     = max(0, Int(windowStart * Double(n)))
+                    let endIdx       = min(n, max(startIdx + 1, Int(windowEnd * Double(n))))
+                    let visibleCount = endIdx - startIdx
+                    guard visibleCount > 0 else { return }
+
+                    let channelCount = peaks.count
+                    let bandHeight   = size.height / CGFloat(channelCount)
+                    let step         = size.width / CGFloat(visibleCount)
+
+                    for (ch, channelPeaks) in peaks.enumerated() {
+                        let midY = bandHeight * CGFloat(ch) + bandHeight / 2
+                        var path = Path()
+                        for i in startIdx..<endIdx {
+                            let x   = CGFloat(i - startIdx) * step + step / 2
+                            let amp = CGFloat(channelPeaks[i]) * (bandHeight / 2) * 0.9
+                            path.move(to:    CGPoint(x: x, y: midY - amp))
+                            path.addLine(to: CGPoint(x: x, y: midY + amp))
+                        }
+                        ctx.stroke(path, with: .color(.accentColor.opacity(0.8)),
+                                   style: StrokeStyle(lineWidth: max(1, step * 0.6)))
                     }
-                    ctx.stroke(path, with: .color(.accentColor.opacity(0.8)),
-                               style: StrokeStyle(lineWidth: max(1, step * 0.6)))
+
+                    if channelCount > 1 {
+                        var div = Path()
+                        for ch in 1..<channelCount {
+                            let y = bandHeight * CGFloat(ch)
+                            div.move(to:    CGPoint(x: 0,          y: y))
+                            div.addLine(to: CGPoint(x: size.width, y: y))
+                        }
+                        ctx.stroke(div, with: .color(.white.opacity(0.15)),
+                                   style: StrokeStyle(lineWidth: 0.5))
+                    }
                 }
                 .background(Color.black.opacity(0.3))
                 .cornerRadius(4)
 
-                // Selected region highlight
-                if let start = player.selectionStart,
-                   let end   = player.selectionEnd, end > start {
-                    let w = geo.size.width
-                    Rectangle()
-                        .fill(Color.accentColor.opacity(0.25))
-                        .frame(width: w * CGFloat(end - start))
-                        .offset(x: w * CGFloat(start))
-                    Rectangle()
-                        .fill(Color.accentColor)
-                        .frame(width: 2)
-                        .offset(x: w * CGFloat(start))
-                    Rectangle()
-                        .fill(Color.accentColor)
-                        .frame(width: 2)
-                        .offset(x: w * CGFloat(end) - 2)
+                // ── Selection region ─────────────────────────────────────────
+                if let selStart = player.selectionStart,
+                   let selEnd   = player.selectionEnd, selEnd > selStart {
+                    let w  = geo.size.width
+                    let vS = toViewFrac(selStart)
+                    let vE = toViewFrac(selEnd)
+                    if vE > 0 && vS < 1 {
+                        let cS = max(0, vS)
+                        let cE = min(1, vE)
+                        Rectangle()
+                            .fill(Color.accentColor.opacity(0.25))
+                            .frame(width: w * CGFloat(cE - cS))
+                            .offset(x:    w * CGFloat(cS))
+                        Rectangle()
+                            .fill(Color.accentColor)
+                            .frame(width: 2)
+                            .offset(x: w * CGFloat(cS))
+                        Rectangle()
+                            .fill(Color.accentColor)
+                            .frame(width: 2)
+                            .offset(x: w * CGFloat(cE) - 2)
+                    }
                 }
 
-                // Played portion overlay
-                Rectangle()
-                    .fill(Color.accentColor.opacity(0.12))
-                    .frame(width: geo.size.width * player.playPosition)
+                // ── Played portion ───────────────────────────────────────────
+                let vPlay = toViewFrac(player.playPosition)
+                if vPlay > 0 {
+                    Rectangle()
+                        .fill(Color.accentColor.opacity(0.12))
+                        .frame(width: geo.size.width * CGFloat(min(1, vPlay)))
+                }
 
-                // Playhead
-                Rectangle()
-                    .fill(Color.white.opacity(0.9))
-                    .frame(width: 1.5)
-                    .offset(x: geo.size.width * player.playPosition - 0.75)
+                // ── Playhead ─────────────────────────────────────────────────
+                if vPlay >= 0 && vPlay <= 1 {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.9))
+                        .frame(width: 1.5)
+                        .offset(x: geo.size.width * CGFloat(vPlay) - 0.75)
+                }
+
+                // ── Zoom reset badge ─────────────────────────────────────────
+                if zoomLevel > 1.01 {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button {
+                                withAnimation(.easeOut(duration: 0.18)) {
+                                    zoomLevel   = 1.0
+                                    windowStart = 0.0
+                                }
+                            } label: {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.75))
+                                    .padding(5)
+                                    .background(Color.black.opacity(0.55))
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Reset zoom  (double-click)")
+                            .padding(5)
+                        }
+                        Spacer()
+                    }
+                }
             }
             .contentShape(Rectangle())
+
+            // ── Scroll wheel / trackpad swipe ────────────────────────────────
+            .overlay(
+                ScrollWheelReceiver { deltaX, deltaY, locFrac in
+                    if abs(deltaY) >= abs(deltaX) {
+                        // Vertical: zoom in/out, anchored under cursor
+                        let factor = exp(-Double(deltaY) * 0.022)
+                        zoom(by: factor, anchorViewFrac: locFrac)
+                    } else {
+                        // Horizontal: pan
+                        let fileDelta = Double(deltaX) / Double(geo.size.width) * windowSize
+                        pan(by: fileDelta)
+                    }
+                }
+            )
+
+            // ── Pinch to zoom ────────────────────────────────────────────────
             .gesture(
+                MagnificationGesture()
+                    .onChanged { value in
+                        if pinchBase == nil { pinchBase = zoomLevel }
+                        let target = (pinchBase ?? zoomLevel) * Double(value)
+                        zoom(to: target, anchorViewFrac: 0.5)
+                    }
+                    .onEnded { _ in pinchBase = nil }
+            )
+
+            // ── Selection drag / seek ────────────────────────────────────────
+            .simultaneousGesture(
                 DragGesture(minimumDistance: 2)
                     .onChanged { val in
                         let w    = geo.size.width
-                        let frac = clamp(val.location.x / w)
+                        let frac = toFileFrac(val.location.x / w)
                         if dragStart == nil {
-                            dragStart = clamp(val.startLocation.x / w)
+                            dragStart = toFileFrac(val.startLocation.x / w)
                         }
                         guard let start = dragStart else { return }
                         if frac >= start {
@@ -80,27 +192,57 @@ struct WaveformView: View {
                     }
                     .onEnded { val in
                         let w    = geo.size.width
-                        let frac = clamp(val.location.x / w)
+                        let frac = toFileFrac(val.location.x / w)
                         guard let start = dragStart else { return }
                         dragStart = nil
-                        let minSelectionPx: CGFloat = 4
-                        if abs(val.location.x - val.startLocation.x) < minSelectionPx {
+                        if abs(val.location.x - val.startLocation.x) < 4 {
                             player.seek(to: frac)
                             if playOnClick { player.play() }
                         }
                     }
             )
+
+            // ── Double-click to reset zoom ────────────────────────────────────
+            .onTapGesture(count: 2) {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    zoomLevel   = 1.0
+                    windowStart = 0.0
+                }
+            }
             .onTapGesture { location in
-                player.seek(to: clamp(location.x / geo.size.width))
+                player.seek(to: toFileFrac(location.x / geo.size.width))
                 if playOnClick { player.play() }
             }
+
             .onAppear { loadPeaks(width: Int(geo.size.width)) }
+            .onChange(of: url) { _, _ in
+                zoomLevel   = 1.0
+                windowStart = 0.0
+                loadPeaks(width: Int(geo.size.width))
+            }
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Zoom / pan
 
-    private func clamp(_ v: Double) -> Double { min(max(v, 0), 1) }
+    private func zoom(by factor: Double, anchorViewFrac: Double) {
+        zoom(to: zoomLevel * factor, anchorViewFrac: anchorViewFrac)
+    }
+
+    private func zoom(to newZoom: Double, anchorViewFrac: Double) {
+        let clamped       = max(1.0, min(newZoom, 500.0))
+        let newWindowSize = 1.0 / clamped
+        let anchorFile    = toFileFrac(anchorViewFrac)
+        let newStart      = anchorFile - anchorViewFrac * newWindowSize
+        windowStart = max(0, min(newStart, 1.0 - newWindowSize))
+        zoomLevel   = clamped
+    }
+
+    private func pan(by fileDelta: Double) {
+        windowStart = max(0, min(windowStart + fileDelta, 1.0 - windowSize))
+    }
+
+    // MARK: - Peak loading
 
     private func loadPeaks(width: Int) {
         let targetURL   = url
@@ -110,9 +252,37 @@ struct WaveformView: View {
             return
         }
         Task.detached(priority: .userInitiated) {
-            guard let generated = try? await WaveformGenerator.peaks(for: targetURL, targetSamples: width) else { return }
-            ThumbnailCache.shared.set(peaks: generated, url: targetURL.path, mtime: targetMtime, width: width)
+            guard let generated = try? await WaveformGenerator.peaks(for: targetURL,
+                                                                      targetSamples: width)
+            else { return }
+            ThumbnailCache.shared.set(peaks: generated, url: targetURL.path,
+                                      mtime: targetMtime, width: width)
             await MainActor.run { peaks = generated }
+        }
+    }
+}
+
+// MARK: - Scroll wheel capture (AppKit bridge)
+
+private struct ScrollWheelReceiver: NSViewRepresentable {
+    /// Callback: (deltaX, deltaY, locationFrac 0…1 in view width)
+    let onScroll: (CGFloat, CGFloat, Double) -> Void
+
+    func makeNSView(context: Context) -> WheelView { WheelView(onScroll: onScroll) }
+    func updateNSView(_ v: WheelView, context: Context) { v.onScroll = onScroll }
+
+    final class WheelView: NSView {
+        var onScroll: (CGFloat, CGFloat, Double) -> Void
+        init(onScroll: @escaping (CGFloat, CGFloat, Double) -> Void) {
+            self.onScroll = onScroll
+            super.init(frame: .zero)
+        }
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func scrollWheel(with event: NSEvent) {
+            let loc  = convert(event.locationInWindow, from: nil)
+            let frac = bounds.width > 0 ? Double(loc.x / bounds.width) : 0.5
+            onScroll(event.scrollingDeltaX, event.scrollingDeltaY, frac)
         }
     }
 }

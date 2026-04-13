@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct FileListView: View {
     @Environment(AppEnvironment.self) var env
@@ -26,12 +27,23 @@ struct FileListView: View {
             columnsA
             columnsB
         } rows: {
-            ForEach(sortedRows) { TableRow($0) }
+            ForEach(sortedRows) { row in
+                TableRow(row)
+                    .contextMenu {
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting(
+                                [URL(fileURLWithPath: row.file.fileURL)])
+                        }
+                    }
+            }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            SearchBar(text: $vm.searchQuery, scope: $vm.searchScope)
-                .padding(8)
-                .background(.bar)
+            VStack(spacing: 0) {
+                PanelHeader(title: "Browser")
+                SearchBar(text: $vm.searchQuery, scope: $vm.searchScope)
+                    .padding(8)
+                    .background(.bar)
+            }
         }
         .overlay {
             if sortedRows.isEmpty {
@@ -125,6 +137,14 @@ struct FileListView: View {
             label11(row.file.libraryName)
         }
         .width(min: 60, ideal: 90).customizationID("library")
+
+        TableColumn("Filename", value: \.file.filename) { row in
+            Text(row.file.filename)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+        }
+        .customizationID("filename")
     }
 
     // MARK: - Helpers
