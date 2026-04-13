@@ -1,45 +1,36 @@
 import Foundation
-import AVFoundation
 
-/// Scans folders recursively and keeps the database in sync via FSEvents.
+struct ScanFailure {
+    let path: String
+    let reason: String
+}
+
+/// Scans folders recursively on demand. No live FSEvents watching.
 final class FolderScanner {
     private let libraryService: LibraryService
-    private var watchers: [String: FSEventsWatcher] = [:]
 
-    /// Called on the MainActor when a full folder scan begins.
+    /// Called on the MainActor when a scan begins.
     var onScanStarted: ((String) -> Void)?
-    /// Called on the MainActor when a full folder scan completes.
+    /// Called on the MainActor when a scan completes.
     var onScanFinished: ((String) -> Void)?
+    /// Called on the MainActor every 25 files with (currentFilePath, scannedCount).
+    var onScanProgress: ((String, Int) -> Void)?
+
+    /// URL to append scan error logs to. Set by AppEnvironment to the DB directory.
+    var logFileURL: URL?
 
     init(libraryService: LibraryService) {
         self.libraryService = libraryService
     }
 
-    /// Perform an initial full scan of a folder and start watching it for changes.
-    func startWatching(path: String) {
-        guard watchers[path] == nil else { return }
-        print("[FolderScanner] startWatching: \(path)")
-
-        // Full scan on background thread
+    /// Scans a folder for new/modified files (skips unchanged). Used when adding a folder.
+    func scan(path: String) {
         Task.detached(priority: .utility) { [weak self] in
             await self?.scanFolder(path: path, force: false)
         }
-
-        // Live watcher
-        watchers[path] = FSEventsWatcher(paths: [path]) { [weak self] paths, flags in
-            self?.handleEvents(paths: paths, flags: flags)
-        }
     }
 
-    func stopWatching(path: String) {
-        watchers.removeValue(forKey: path)
-    }
-
-    func stopAll() {
-        watchers.removeAll()
-    }
-
-    /// Force re-ingests every audio file in the folder, ignoring mtime cache.
+    /// Force re-ingests every audio file, ignoring the mtime cache.
     func rescan(path: String) async {
         await scanFolder(path: path, force: true)
     }
@@ -48,7 +39,8 @@ final class FolderScanner {
 
     private func scanFolder(path: String, force: Bool) async {
         await MainActor.run { onScanStarted?(path) }
-        print("[FolderScanner] scanFolder start: \(path)")
+        print("[FolderScanner] scanFolder start: \(path) force=\(force)")
+
         let fm  = FileManager.default
         let url = URL(fileURLWithPath: path)
         guard let enumerator = fm.enumerator(
@@ -56,38 +48,75 @@ final class FolderScanner {
             includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
         ) else {
-            print("[FolderScanner] enumerator is nil — cannot access path")
+            print("[FolderScanner] enumerator nil — cannot access path")
+            await MainActor.run { onScanFinished?(path) }
             return
         }
 
+        // Pre-load all known mtimes: one SELECT instead of one per file.
+        let knownMtimes: [String: Double] = force ? [:] : ((try? libraryService.fetchAllMtimes()) ?? [:])
+
         var count = 0
         var audioCount = 0
+        var skipped = 0
+        var failures: [ScanFailure] = []
+
         for case let fileURL as URL in enumerator {
             count += 1
             guard isAudioFile(fileURL) else { continue }
             audioCount += 1
-            if audioCount <= 3 { print("[FolderScanner] found audio file: \(fileURL.lastPathComponent)") }
-            await libraryService.ingestFile(at: fileURL, force: force)
+
+            // Fast path: skip unchanged files.
+            if !force,
+               let attrs = try? fm.attributesOfItem(atPath: fileURL.path),
+               let mtime = attrs[.modificationDate] as? Date,
+               knownMtimes[fileURL.path] == mtime.timeIntervalSince1970 {
+                skipped += 1
+                continue
+            }
+
+            do {
+                try await libraryService.ingestFile(at: fileURL, force: force)
+            } catch {
+                failures.append(ScanFailure(path: fileURL.path, reason: error.localizedDescription))
+                print("[FolderScanner] skip \(fileURL.lastPathComponent): \(error.localizedDescription)")
+            }
+
+            if audioCount % 200 == 0 {
+                let p = fileURL.path
+                let n = audioCount
+                await MainActor.run { onScanProgress?(p, n) }
+            }
         }
-        print("[FolderScanner] scanFolder done — \(count) files scanned, \(audioCount) audio files ingested")
+
+        let ingested = audioCount - skipped - failures.count
+        print("[FolderScanner] done — \(count) visited, \(skipped) unchanged, \(ingested) ingested, \(failures.count) errors")
+        writeLog(scanPath: path, failures: failures)
         await MainActor.run { onScanFinished?(path) }
     }
 
-    private func handleEvents(paths: [String], flags: [FSEventStreamEventFlags]) {
-        for (path, flag) in zip(paths, flags) {
-            let url = URL(fileURLWithPath: path)
-            guard isAudioFile(url) else { continue }
+    private func writeLog(scanPath: String, failures: [ScanFailure]) {
+        guard !failures.isEmpty, let logURL = logFileURL else { return }
 
-            if flag.isCreated || flag.isModified {
-                Task.detached(priority: .utility) { [weak self] in
-                    await self?.libraryService.ingestFile(at: url)
-                }
-            } else if flag.isRemoved {
-                Task.detached(priority: .utility) { [weak self] in
-                    await self?.libraryService.removeFile(at: url)
-                }
-            }
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        var lines = ["=== Scan: \(scanPath)  @  \(timestamp) ==="]
+        for f in failures {
+            lines.append("  \(f.path)")
+            lines.append("    \(f.reason)")
         }
+        lines.append("")
+        guard let data = lines.joined(separator: "\n").data(using: .utf8) else { return }
+
+        if FileManager.default.fileExists(atPath: logURL.path) {
+            if let handle = try? FileHandle(forWritingTo: logURL) {
+                try? handle.seekToEnd()
+                try? handle.write(contentsOf: data)
+                try? handle.close()
+            }
+        } else {
+            try? data.write(to: logURL, options: .atomic)
+        }
+        print("[FolderScanner] wrote \(failures.count) error(s) to \(logURL.lastPathComponent)")
     }
 
     private func isAudioFile(_ url: URL) -> Bool {

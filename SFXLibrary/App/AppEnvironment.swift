@@ -13,8 +13,29 @@ final class AppEnvironment {
     var searchRepository: SearchRepository
     let ptslClient = PTSLClient.shared
 
-    /// Reactively updated list of all audio files, sorted by filename.
+    /// Reactively updated list of audio files (capped at browseLimit for UI safety).
     var audioFiles: [AudioFile] = []
+
+    /// Total number of audio files in the database (may exceed audioFiles.count).
+    var totalAudioFileCount: Int = 0
+
+    /// Maximum rows loaded into the browse list. Search results are separate and always <= 200.
+    static let browseLimit = 5_000
+
+    /// When set, the browse list and search are limited to files under this path prefix.
+    var folderFilter: String? = nil {
+        didSet {
+            guard folderFilter != oldValue else { return }
+            // Debounce: let GRDB finish any in-flight read before restarting
+            // the observation, and coalesce rapid sidebar clicks into one reload.
+            filterTask?.cancel()
+            filterTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled, let self else { return }
+                self.startFilesObservation(db: self.db)
+            }
+        }
+    }
 
     /// Reactively updated list of watched folders.
     var watchedFolders: [WatchedFolder] = []
@@ -24,6 +45,10 @@ final class AppEnvironment {
 
     /// True while one or more folder scans are in progress.
     var isScanning: Bool = false
+    /// Filename most recently processed by the scanner (updates every 25 files).
+    var currentScanFile: String = ""
+    /// Running count of audio files processed by the scanner this session.
+    var scannedFileCount: Int = 0
     private var activeScanCount: Int = 0
 
     // MARK: - Playback preferences (persisted)
@@ -39,9 +64,15 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(dragExportMode.rawValue, forKey: "dragExportMode") }
     }
 
+    /// Increments on every database switch — used as a SwiftUI `.id` to force full UI rebuild.
+    var databaseEpoch: Int = 0
+
     @ObservationIgnored private var db: DatabasePool
     @ObservationIgnored private var filesObservation: AnyDatabaseCancellable?
     @ObservationIgnored private var foldersObservation: AnyDatabaseCancellable?
+    @ObservationIgnored private var countObservation: AnyDatabaseCancellable?
+    @ObservationIgnored private var filterTask: Task<Void, Never>?
+    @ObservationIgnored private var observationGeneration: Int = 0
 
     private static let lastDBPathKey = "lastDatabasePath"
 
@@ -87,6 +118,10 @@ final class AppEnvironment {
 
     /// Renames the current database file in-place (same directory, new filename).
     func renameDatabase(to newName: String) {
+        guard !isScanning else {
+            print("[AppEnv] renameDatabase: ignored — scan in progress")
+            return
+        }
         let safeName = newName.hasSuffix(".sqlite") ? newName : newName + ".sqlite"
         let dir    = currentDatabaseURL.deletingLastPathComponent()
         let newURL = dir.appendingPathComponent(safeName)
@@ -98,18 +133,19 @@ final class AppEnvironment {
         try? db.write { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
 
         // Stop observations and watchers so nothing holds GRDB write locks.
-        filesObservation  = nil
+        filesObservation   = nil
         foldersObservation = nil
-        folderScanner.stopAll()
+        countObservation   = nil
 
-        // DatabasePool holds the file open via multiple file descriptors.
-        // We must replace self.db with a throwaway pool pointing elsewhere
-        // BEFORE touching the files on disk — otherwise SQLite logs "vnode renamed
-        // while in use" and the process crashes with a disk I/O error.
+        // Release every strong reference to the original pool before touching files.
+        // self.db, libraryService, and searchRepository all hold the pool — all three
+        // must be replaced or the WAL shared-memory file stays locked and the rename
+        // races with an open connection, causing a disk I/O error on reopen.
         let tempURL = dir.appendingPathComponent(".sfxlib_rename_\(UUID().uuidString).sqlite")
-        // swiftlint:disable:next force_try
         if let tempPool = try? DatabasePool(path: tempURL.path) {
-            self.db = tempPool   // old pool is now released; its fds are closed
+            self.db             = tempPool
+            self.libraryService   = LibraryService(db: tempPool)
+            self.searchRepository = SearchRepository(db: tempPool)
         }
 
         // Rename the real files now that no pool holds them open.
@@ -155,6 +191,20 @@ final class AppEnvironment {
         }
     }
 
+    /// Shows a save panel and creates a fresh blank database at the chosen location.
+    func newDatabase() {
+        Task { @MainActor in
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.init(filenameExtension: "sqlite")!]
+            panel.nameFieldStringValue = "library.sqlite"
+            panel.title = "Create New Database"
+            panel.message = "Choose a location and name for the new library database."
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            let dest = url.pathExtension.lowercased() == "sqlite" ? url : url.appendingPathExtension("sqlite")
+            self.switchToDatabase(at: dest)
+        }
+    }
+
     /// Opens an existing `.sqlite` database chosen by the user and switches to it.
     func openDatabase() {
         Task { @MainActor in
@@ -172,6 +222,10 @@ final class AppEnvironment {
 
     /// Tears down the current database, deletes it from disk, and starts fresh at the default path.
     func deleteDatabase() {
+        guard !isScanning else {
+            print("[AppEnv] deleteDatabase: ignored — scan in progress")
+            return
+        }
         let urlToDelete = currentDatabaseURL
 
         // Checkpoint WAL so SQLite is in a clean state before we unlink the files.
@@ -180,7 +234,6 @@ final class AppEnvironment {
         // Stop observations and watchers before touching the pool.
         filesObservation  = nil
         foldersObservation = nil
-        folderScanner.stopAll()
 
         // Delete the old files (the open pool still holds its fd — safe on Unix).
         let base = urlToDelete.path
@@ -195,25 +248,37 @@ final class AppEnvironment {
     /// Tears down the current setup and opens a database at `url`, running migrations.
     /// Persists the choice to UserDefaults so it's restored on next launch.
     func switchToDatabase(at url: URL, persist: Bool = true) {
-        filesObservation  = nil
+        filterTask?.cancel()
+        filterTask = nil
+        folderFilter = nil      // clear stale filter; didSet may create a new filterTask
+        filterTask?.cancel()    // cancel any task just created by the folderFilter reset
+        filterTask = nil
+        filesObservation   = nil
         foldersObservation = nil
-        folderScanner.stopAll()
+        countObservation   = nil
+        observationGeneration += 1
+        databaseEpoch += 1
 
-        let newDB = try! DatabasePool.setup(at: url)
-        self.db               = newDB
+        // Update URL and persist immediately — title bar and menu reflect the new
+        // name regardless of whether the pool setup below succeeds.
         self.currentDatabaseURL = url
-        let ls = LibraryService(db: newDB)
-        self.libraryService   = ls
-        let scanner = FolderScanner(libraryService: ls)
-        self.folderScanner    = scanner
-        self.searchRepository = SearchRepository(db: newDB)
-
-        audioFiles    = []
-        watchedFolders = []
-
         if persist {
             UserDefaults.standard.set(url.path, forKey: AppEnvironment.lastDBPathKey)
         }
+
+        guard let newDB = try? DatabasePool.setup(at: url) else {
+            print("[AppEnv] switchToDatabase: failed to open \(url.lastPathComponent)")
+            return
+        }
+        self.db             = newDB
+        let ls              = LibraryService(db: newDB)
+        self.libraryService = ls
+        let scanner         = FolderScanner(libraryService: ls)
+        self.folderScanner  = scanner
+        self.searchRepository = SearchRepository(db: newDB)
+
+        audioFiles     = []
+        watchedFolders = []
 
         startObservations(db: newDB, ls: ls, scanner: scanner)
     }
@@ -223,6 +288,7 @@ final class AppEnvironment {
     private func startObservations(db: DatabasePool, ls: LibraryService, scanner: FolderScanner) {
         startFilesObservation(db: db)
 
+        let gen = observationGeneration
         let foldersObs = ValueObservation.tracking { db in
             try WatchedFolder.fetchAll(db)
         }
@@ -230,8 +296,16 @@ final class AppEnvironment {
             in: db,
             scheduling: .async(onQueue: .main),
             onError: { error in print("[AppEnv] folders observation error: \(error)") },
-            onChange: { [weak self] folders in self?.watchedFolders = folders }
+            onChange: { [weak self] folders in
+                guard let self, self.observationGeneration == gen else { return }
+                self.watchedFolders = folders
+            }
         )
+
+        // Point the scanner's error log at the current database directory.
+        scanner.logFileURL = currentDatabaseURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("scan_errors.txt")
 
         // Wire scan progress callbacks before starting watchers.
         // Pause the files observation while scanning so 50k individual upserts
@@ -240,7 +314,10 @@ final class AppEnvironment {
         scanner.onScanStarted = { [weak self] _ in
             guard let self else { return }
             if self.activeScanCount == 0 {
-                self.filesObservation = nil   // pause
+                self.filesObservation = nil   // pause — avoids O(n²) table rebuilds
+                self.countObservation = nil   // pause — fires on every write otherwise
+                self.currentScanFile  = ""
+                self.scannedFileCount = 0
             }
             self.activeScanCount += 1
             self.isScanning = true
@@ -250,21 +327,32 @@ final class AppEnvironment {
             self.activeScanCount = max(0, self.activeScanCount - 1)
             if self.activeScanCount == 0 {
                 self.isScanning = false
+                self.currentScanFile = ""
                 self.startFilesObservation(db: self.db)   // one reload, then resume watching
             }
         }
-
-        // Resume watching any folders that were added in a previous session
-        let existing = (try? ls.fetchWatchedFolders()) ?? []
-        for folder in existing {
-            scanner.startWatching(path: folder.path)
+        scanner.onScanProgress = { [weak self] filename, count in
+            self?.currentScanFile  = filename
+            self?.scannedFileCount = count
         }
+
+        // No auto-scan on open — use Rescan to pick up changes manually.
     }
 
     /// Starts (or restarts) the files observation.
-    /// Excludes the `ixml_raw` and `waveform_peaks` blob columns so the in-memory
-    /// array doesn't balloon for large libraries (ixmlRaw alone can be several KB/file).
+    /// Excludes blob columns to keep the in-memory array lean.
+    /// Capped at browseLimit rows. Filtered to folderFilter path prefix when set.
     private func startFilesObservation(db: DatabasePool) {
+        filesObservation  = nil
+        countObservation  = nil
+
+        let gen    = observationGeneration
+        let limit  = AppEnvironment.browseLimit
+        let filter = folderFilter
+
+        let whereClause = filter != nil ? "WHERE file_url LIKE ?" : ""
+        let fileArgs: StatementArguments = filter != nil ? ["\(filter!)/%"] : []
+
         let sql = """
             SELECT id, file_url, bookmark_data, filename, file_size, mtime, format,
                    duration, sample_rate, bit_depth, channels, lufs,
@@ -275,16 +363,37 @@ final class AppEnvironment {
                    notes, star_rating,
                    NULL as waveform_peaks,
                    date_added, last_modified
-            FROM audio_files ORDER BY filename
+            FROM audio_files \(whereClause) ORDER BY filename
+            LIMIT \(limit)
             """
         let obs = ValueObservation.tracking { db in
-            try AudioFile.fetchAll(db, sql: sql)
+            try AudioFile.fetchAll(db, sql: sql, arguments: fileArgs)
         }
         filesObservation = obs.start(
             in: db,
             scheduling: .async(onQueue: .main),
             onError: { error in print("[AppEnv] files observation error: \(error)") },
-            onChange: { [weak self] files in self?.audioFiles = files }
+            onChange: { [weak self] files in
+                guard let self, self.observationGeneration == gen else { return }
+                self.audioFiles = files
+            }
+        )
+
+        let countSQL = filter != nil
+            ? "SELECT COUNT(*) FROM audio_files WHERE file_url LIKE ?"
+            : "SELECT COUNT(*) FROM audio_files"
+        let countArgs: StatementArguments = filter != nil ? ["\(filter!)/%"] : []
+        let countObs = ValueObservation.tracking { db in
+            try Int.fetchOne(db, sql: countSQL, arguments: countArgs) ?? 0
+        }
+        countObservation = countObs.start(
+            in: db,
+            scheduling: .async(onQueue: .main),
+            onError: { _ in },
+            onChange: { [weak self] count in
+                guard let self, self.observationGeneration == gen else { return }
+                self.totalAudioFileCount = count
+            }
         )
     }
 }

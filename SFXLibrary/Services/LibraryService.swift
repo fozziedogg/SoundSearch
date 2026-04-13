@@ -14,10 +14,10 @@ final class LibraryService {
 
     // MARK: - Ingest
 
-    func ingestFile(at url: URL, force: Bool = false) async {
+    func ingestFile(at url: URL, force: Bool = false) async throws {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let mtime = attrs[.modificationDate] as? Date,
-              let size  = attrs[.size] as? Int64 else { return }
+              let size  = attrs[.size] as? Int64 else { return }  // file disappeared — skip silently
 
         let mtimeDouble = mtime.timeIntervalSince1970
 
@@ -96,7 +96,11 @@ final class LibraryService {
             file.duration   = meta.duration
         }
 
-        try? fileRepo.upsert(&file)
+        try fileRepo.upsert(&file)
+    }
+
+    func fetchAllMtimes() throws -> [String: Double] {
+        try fileRepo.fetchAllMtimes()
     }
 
     func removeFile(at url: URL) async {
@@ -110,13 +114,14 @@ final class LibraryService {
         var folder = WatchedFolder(id: nil, path: url.path,
                                    bookmarkData: bookmark, dateAdded: Date())
         try db.write { db in try folder.upsert(db) }
-        scanner.startWatching(path: url.path)
+        scanner.scan(path: url.path)
     }
 
     func removeWatchedFolder(path: String, scanner: FolderScanner) throws {
-        scanner.stopWatching(path: path)
         try db.write { db in
             try WatchedFolder.filter(Column("path") == path).deleteAll(db)
+            try db.execute(sql: "DELETE FROM audio_files WHERE file_url LIKE ?",
+                           arguments: ["\(path)/%"])
         }
     }
 

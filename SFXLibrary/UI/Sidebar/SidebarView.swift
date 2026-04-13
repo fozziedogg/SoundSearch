@@ -3,6 +3,7 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(AppEnvironment.self) var env
     @State private var selection: SidebarItem? = .allFiles
+    @State private var expandedFolders: Set<String> = []
     @State private var isRescanning: Set<String> = []
 
     var body: some View {
@@ -12,73 +13,42 @@ struct SidebarView: View {
                     .tag(SidebarItem.allFiles)
             }
 
-            Section("Watched Folders") {
+            Section("Folders") {
                 ForEach(env.watchedFolders) { folder in
-                    folderRow(folder)
+                    FolderTreeRow(
+                        path: folder.path,
+                        canRemove: true,
+                        expandedFolders: $expandedFolders,
+                        isRescanning: $isRescanning,
+                        onRescan: rescan,
+                        onRemove: removeFolder
+                    )
                 }
-
-                Label("Add Folder…", systemImage: "plus.circle")
-                    .foregroundColor(.accentColor)
-                    .onTapGesture { addFolder() }
             }
 
-            Section("Tags") {
-                // TODO: populate from TagRepository
-            }
-
-            Section("Categories") {
-                // TODO: populate from CategoryRepository
-            }
         }
         .listStyle(.sidebar)
         .frame(minWidth: 200)
-    }
-
-    // MARK: - Folder row
-
-    @ViewBuilder
-    private func folderRow(_ folder: WatchedFolder) -> some View {
-        let scanning = isRescanning.contains(folder.path)
-        HStack(spacing: 6) {
-            Image(systemName: "folder")
-                .foregroundColor(.secondary)
-            Text(folderDisplayName(folder.path))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer()
-            if scanning {
-                ProgressView()
-                    .controlSize(.mini)
-                    .scaleEffect(0.75)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { env.addWatchedFolder() }) {
+                    Label("Add Folder", systemImage: "plus")
+                }
+                .help("Add a folder to the library")
+                .disabled(env.isScanning)
             }
         }
-        .tag(SidebarItem.folder(folder.path))
-        .contextMenu {
-            Button {
-                rescan(folder)
-            } label: {
-                Label("Rescan", systemImage: "arrow.clockwise")
-            }
-            .disabled(scanning)
-
-            Divider()
-
-            Button(role: .destructive) {
-                remove(folder)
-            } label: {
-                Label("Remove Folder", systemImage: "trash")
+        .onChange(of: selection) { _, newSel in
+            switch newSel {
+            case .folder(let path): env.folderFilter = path
+            default:                env.folderFilter = nil
             }
         }
     }
 
     // MARK: - Actions
 
-    private func addFolder() {
-        env.addWatchedFolder()
-    }
-
-    private func rescan(_ folder: WatchedFolder) {
-        let path = folder.path
+    private func rescan(path: String) {
         isRescanning.insert(path)
         Task.detached(priority: .utility) {
             await env.folderScanner.rescan(path: path)
@@ -86,15 +56,107 @@ struct SidebarView: View {
         }
     }
 
-    private func remove(_ folder: WatchedFolder) {
-        try? env.libraryService.removeWatchedFolder(path: folder.path,
-                                                     scanner: env.folderScanner)
+    private func removeFolder(path: String) {
+        try? env.libraryService.removeWatchedFolder(path: path, scanner: env.folderScanner)
+        if case .folder(let sel) = selection, sel.hasPrefix(path) {
+            selection = .allFiles
+        }
+    }
+}
+
+// MARK: - Recursive folder tree row
+
+struct FolderTreeRow: View {
+    let path: String
+    let canRemove: Bool
+    @Binding var expandedFolders: Set<String>
+    @Binding var isRescanning: Set<String>
+    let onRescan: (String) -> Void
+    let onRemove: (String) -> Void
+
+    /// Cached subdirectories — nil until first appear, then set once.
+    @State private var children: [String]? = nil
+
+    private var name: String { URL(fileURLWithPath: path).lastPathComponent }
+
+    var body: some View {
+        Group {
+            if let kids = children, !kids.isEmpty {
+                DisclosureGroup(
+                    isExpanded: Binding(
+                        get: { expandedFolders.contains(path) },
+                        set: { if $0 { expandedFolders.insert(path) }
+                               else  { expandedFolders.remove(path) } }
+                    )
+                ) {
+                    ForEach(kids, id: \.self) { child in
+                        FolderTreeRow(
+                            path: child,
+                            canRemove: false,
+                            expandedFolders: $expandedFolders,
+                            isRescanning: $isRescanning,
+                            onRescan: onRescan,
+                            onRemove: onRemove
+                        )
+                    }
+                } label: {
+                    rowLabel
+                }
+            } else {
+                rowLabel
+            }
+        }
+        .task {
+            guard children == nil else { return }
+            let p = path
+            let subs = await Task.detached(priority: .userInitiated) {
+                Self.subfolders(of: p)
+            }.value
+            children = subs
+        }
     }
 
-    // MARK: - Helpers
+    private var rowLabel: some View {
+        let scanning = isRescanning.contains(path)
+        return HStack(spacing: 6) {
+            Image(systemName: canRemove ? "folder" : "folder.fill")
+                .foregroundColor(.secondary)
+                .font(.system(size: 12))
+            Text(name)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+            if scanning {
+                ProgressView().controlSize(.mini).scaleEffect(0.75)
+            }
+        }
+        .tag(SidebarItem.folder(path))
+        .contextMenu {
+            Button { onRescan(path) } label: {
+                Label("Rescan", systemImage: "arrow.clockwise")
+            }
+            .disabled(scanning)
 
-    private func folderDisplayName(_ path: String) -> String {
-        URL(fileURLWithPath: path).lastPathComponent
+            if canRemove {
+                Divider()
+                Button(role: .destructive) { onRemove(path) } label: {
+                    Label("Remove Folder", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    nonisolated private static func subfolders(of path: String) -> [String] {
+        let url = URL(fileURLWithPath: path)
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        return contents
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            .map    { $0.path }
+            .sorted()
     }
 }
 

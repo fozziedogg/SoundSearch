@@ -75,14 +75,19 @@ struct RIFFParser {
                 break
 
             } else if fourCC == "bext" {
-                result.bextData = handle.readData(ofLength: size)
-                if size & 1 == 1 { handle.seek(toFileOffset: handle.offsetInFile + 1) }
+                let safeSize = min(size, 1_048_576)   // bext is never legitimately > 1 MB
+                result.bextData = handle.readData(ofLength: safeSize)
+                if paddedSize > safeSize { handle.seek(toFileOffset: handle.offsetInFile + UInt64(paddedSize - safeSize)) }
+                else if size & 1 == 1 { handle.seek(toFileOffset: handle.offsetInFile + 1) }
 
             } else if fourCC == "iXML" {
-                result.ixmlData = handle.readData(ofLength: size)
-                if size & 1 == 1 { handle.seek(toFileOffset: handle.offsetInFile + 1) }
+                let safeSize = min(size, 1_048_576)   // iXML metadata is never legitimately > 1 MB
+                result.ixmlData = handle.readData(ofLength: safeSize)
+                if paddedSize > safeSize { handle.seek(toFileOffset: handle.offsetInFile + UInt64(paddedSize - safeSize)) }
+                else if size & 1 == 1 { handle.seek(toFileOffset: handle.offsetInFile + 1) }
 
             } else {
+                guard paddedSize > 0 else { break }  // zero-size unknown chunk — can't advance, bail
                 handle.seek(toFileOffset: handle.offsetInFile + UInt64(paddedSize))
             }
         }

@@ -41,9 +41,12 @@ struct SFXLibraryApp: App {
                         guard !name.isEmpty else { return }
                         env.renameDatabase(to: name)
                     }
+                    .disabled(env.isScanning)
                     Button("Cancel", role: .cancel) { }
                 } message: {
-                    Text("Enter a new name for the database file. The .sqlite extension will be added automatically if omitted.")
+                    Text(env.isScanning
+                         ? "A scan is in progress — please wait for it to finish before renaming."
+                         : "Enter a new name for the database file. The .sqlite extension will be added automatically if omitted.")
                 }
         }
         .windowStyle(.titleBar)
@@ -90,8 +93,7 @@ struct SFXLibraryApp: App {
                 }
 
                 Button("New Database…") {
-                    addFolderAfterDelete = true
-                    showDeleteConfirmation = true
+                    env.newDatabase()
                 }
             }
         }

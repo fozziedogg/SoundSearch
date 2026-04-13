@@ -13,32 +13,44 @@ final class SearchRepository {
     /// FTS5 column filter syntax: `colname:term*` restricts matches to that column.
     func search(query: String,
                 scope: SearchScope = .all,
+                folderFilter: String? = nil,
                 format: String? = nil,
                 minStars: Int = 0,
                 limit: Int = 200,
                 offset: Int = 0) throws -> [AudioFile] {
         try db.read { db in
+            let folderClause = folderFilter != nil ? "AND audio_files.file_url LIKE ?" : ""
+            let folderArg: String? = folderFilter.map { "\($0)/%" }
+
             if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                var request = AudioFile.order(AudioFile.Columns.filename)
-                if minStars > 0 {
-                    request = request.filter(AudioFile.Columns.starRating >= minStars)
-                }
-                return try request.limit(limit, offset: offset).fetchAll(db)
+                let sql = """
+                    SELECT * FROM audio_files
+                    WHERE 1=1
+                    \(folderClause)
+                    \(minStars > 0 ? "AND star_rating >= \(minStars)" : "")
+                    ORDER BY filename
+                    LIMIT \(limit) OFFSET \(offset)
+                """
+                var args: StatementArguments = []
+                if let fa = folderArg { args += [fa] }
+                return try AudioFile.fetchAll(db, sql: sql, arguments: args)
             }
 
             let ftsQuery = buildFTSQuery(query: query, scope: scope)
-            let starFilter = minStars > 0 ? "AND audio_files.star_rating >= \(minStars)" : ""
-
+            let starClause = minStars > 0 ? "AND audio_files.star_rating >= \(minStars)" : ""
             let sql = """
                 SELECT audio_files.*
                 FROM audio_files
                 JOIN audio_files_fts ON audio_files_fts.rowid = audio_files.id
                 WHERE audio_files_fts MATCH ?
-                \(starFilter)
+                \(folderClause)
+                \(starClause)
                 ORDER BY rank
                 LIMIT \(limit) OFFSET \(offset)
             """
-            return try AudioFile.fetchAll(db, sql: sql, arguments: [ftsQuery])
+            var args: StatementArguments = [ftsQuery]
+            if let fa = folderArg { args += [fa] }
+            return try AudioFile.fetchAll(db, sql: sql, arguments: args)
         }
     }
 

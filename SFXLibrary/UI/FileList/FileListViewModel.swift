@@ -35,7 +35,7 @@ final class FileListViewModel: ObservableObject {
 
     private var debounceTask: Task<Void, Never>?
 
-    func search(repo: SearchRepository) async {
+    func search(repo: SearchRepository, folderFilter: String? = nil) async {
         debounceTask?.cancel()
         debounceTask = Task {
             try? await Task.sleep(for: .milliseconds(150))
@@ -43,6 +43,7 @@ final class FileListViewModel: ObservableObject {
             isSearching = true
             searchResults = (try? repo.search(query: searchQuery,
                                                scope: searchScope,
+                                               folderFilter: folderFilter,
                                                limit: 200, offset: 0)) ?? []
             isSearching = false
         }

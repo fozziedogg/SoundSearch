@@ -9,6 +9,7 @@ struct FileListView: View {
     @State private var selectedID: Int64? = nil
     @State private var columnCustomization = TableColumnCustomization<AudioFileRow>()
     @State private var sortOrder: [KeyPathComparator<AudioFileRow>] = []
+    @FocusState private var searchFocused: Bool
 
     private var displayedRows: [AudioFileRow] {
         let files = vm.searchQuery.isEmpty ? env.audioFiles : vm.searchResults
@@ -41,20 +42,40 @@ struct FileListView: View {
             VStack(spacing: 0) {
                 PanelHeader(title: "Browser")
                 if env.isScanning {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .scaleEffect(0.55)
-                            .frame(width: 14, height: 14)
-                        Text("Scanning… \(env.audioFiles.count) files found")
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .scaleEffect(0.5)
+                                .frame(width: 12, height: 12)
+                            Text("\(env.scannedFileCount) files scanned…")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.primary)
+                            Spacer()
+                        }
+                        if !env.currentScanFile.isEmpty {
+                            Text(env.currentScanFile)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.accentColor.opacity(0.07))
+                } else if env.totalAudioFileCount > AppEnvironment.browseLimit {
+                    HStack(spacing: 4) {
+                        Text("Showing first \(AppEnvironment.browseLimit) of \(env.totalAudioFileCount) files — search to find others")
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                         Spacer()
                     }
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.accentColor.opacity(0.07))
+                    .padding(.vertical, 4)
+                    .background(Color.yellow.opacity(0.08))
                 }
-                SearchBar(text: $vm.searchQuery, scope: $vm.searchScope)
+                SearchBar(text: $vm.searchQuery, scope: $vm.searchScope, isFocused: $searchFocused)
                     .padding(8)
                     .background(.bar)
             }
@@ -66,13 +87,23 @@ struct FileListView: View {
             }
         }
         .onChange(of: selectedID) { _, newID in
-            selectedFile = newID.flatMap { id in env.audioFiles.first { $0.id == id } }
+            guard let id = newID else { selectedFile = nil; return }
+            selectedFile = env.audioFiles.first { $0.id == id }
+                        ?? vm.searchResults.first { $0.id == id }
         }
         .onChange(of: vm.searchQuery) { _, _ in
-            Task { await vm.search(repo: env.searchRepository) }
+            Task { await vm.search(repo: env.searchRepository, folderFilter: env.folderFilter) }
         }
         .onChange(of: vm.searchScope) { _, _ in
-            Task { await vm.search(repo: env.searchRepository) }
+            Task { await vm.search(repo: env.searchRepository, folderFilter: env.folderFilter) }
+        }
+        .onChange(of: env.folderFilter) { _, _ in
+            Task { await vm.search(repo: env.searchRepository, folderFilter: env.folderFilter) }
+        }
+        .background {
+            Button("") { searchFocused = true }
+                .keyboardShortcut("f", modifiers: .command)
+                .hidden()
         }
     }
 

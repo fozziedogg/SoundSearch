@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct MainWindowView: View {
     @Environment(AppEnvironment.self) var env
@@ -8,6 +9,12 @@ struct MainWindowView: View {
     private var windowTitle: String {
         let dbName = env.currentDatabaseURL.deletingPathExtension().lastPathComponent
         return "SoundSearch — \(dbName)"
+    }
+
+    private func applyWindowTitle(_ title: String) {
+        NSApplication.shared.windows
+            .filter { $0.isVisible && !($0 is NSPanel) }
+            .forEach { $0.title = title }
     }
 
     var body: some View {
@@ -37,7 +44,20 @@ struct MainWindowView: View {
                     .frame(minHeight: 160)
             }
         }
+        // Force full rebuild of all child @State when the database changes.
+        // This resets sidebar selection, search text, expanded folders, etc.
+        .id(env.databaseEpoch)
         .navigationSplitViewStyle(.balanced)
         .navigationTitle(windowTitle)
+        .onAppear { applyWindowTitle(windowTitle) }
+        .onChange(of: env.currentDatabaseURL) { _, _ in
+            applyWindowTitle(windowTitle)
+            selectedFile = nil
+        }
+        .onChange(of: env.audioFiles) { _, newFiles in
+            if let sel = selectedFile, !newFiles.contains(where: { $0.id == sel.id }) {
+                selectedFile = nil
+            }
+        }
     }
 }

@@ -3,6 +3,7 @@ import SwiftUI
 struct SearchBar: View {
     @Binding var text: String
     @Binding var scope: SearchScope
+    var isFocused: FocusState<Bool>.Binding
 
     var body: some View {
         HStack(spacing: 0) {
@@ -31,6 +32,7 @@ struct SearchBar: View {
                       text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
+                .focused(isFocused)
 
             if !text.isEmpty {
                 Button { text = "" } label: {
