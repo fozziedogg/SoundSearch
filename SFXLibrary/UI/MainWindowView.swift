@@ -5,6 +5,11 @@ struct MainWindowView: View {
     @State private var selectedFile: AudioFile?
     @State private var showFileInfo: Bool = true
 
+    private var windowTitle: String {
+        let dbName = env.currentDatabaseURL.deletingPathExtension().lastPathComponent
+        return "SoundSearch — \(dbName)"
+    }
+
     var body: some View {
         NavigationSplitView {
             SidebarView()
@@ -33,5 +38,6 @@ struct MainWindowView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .navigationTitle(windowTitle)
     }
 }

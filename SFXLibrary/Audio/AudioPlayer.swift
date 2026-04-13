@@ -4,11 +4,12 @@ import CoreAudio
 import Combine
 
 final class AudioPlayer: ObservableObject {
-    @Published var isPlaying:      Bool   = false
-    @Published var playPosition:   Double = 0   // 0.0 – 1.0
-    @Published var duration:       Double = 0
-    @Published var pitchSemitones: Float  = 0
-    @Published var pitchCents:     Float  = 0
+    @Published var isPlaying:    Bool   = false
+    @Published var playPosition: Double = 0   // 0.0 – 1.0
+    @Published var duration:     Double = 0
+    @Published var volume: Float = 1.0 {
+        didSet { engine.mainMixerNode.outputVolume = volume }
+    }
 
     /// Current waveform selection as fractions of total duration. nil = no selection.
     @Published var selectionStart: Double? = nil
@@ -27,7 +28,6 @@ final class AudioPlayer: ObservableObject {
 
     private let engine     = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
-    private let timePitch  = AVAudioUnitTimePitch()
     private var audioFile:  AVAudioFile?
     private var timer:      AnyCancellable?
     private var currentURL: URL?
@@ -40,9 +40,7 @@ final class AudioPlayer: ObservableObject {
 
     init() {
         engine.attach(playerNode)
-        engine.attach(timePitch)
-        engine.connect(playerNode, to: timePitch,            format: nil)
-        engine.connect(timePitch,  to: engine.mainMixerNode, format: nil)
+        engine.connect(playerNode, to: engine.mainMixerNode, format: nil)
 
         // Restore saved output device before starting the engine so we only start once.
         if let savedUID = UserDefaults.standard.string(forKey: "outputDeviceUID"),
@@ -91,6 +89,7 @@ final class AudioPlayer: ObservableObject {
         currentURL    = url
         selectionStart = nil
         selectionEnd   = nil
+        volume         = 1.0
         do {
             audioFile    = try AVAudioFile(forReading: url)
             duration     = Double(audioFile!.length) / audioFile!.processingFormat.sampleRate
@@ -106,6 +105,13 @@ final class AudioPlayer: ObservableObject {
     /// Plays from the current position, or from the active selection if one exists.
     func play() {
         guard let file = audioFile else { return }
+
+        // Stop and clear any pending/idle state so playerTime.sampleTime resets
+        // to 0. Without this, sampleTime keeps incrementing while the node idles
+        // after a segment finishes, making seekFrame + sampleTime wildly wrong.
+        scheduleGeneration += 1
+        playerNode.stop()
+
         if let start = selectionStart, let end = selectionEnd, end > start {
             let startFrame = AVAudioFramePosition(start * Double(file.length))
             let endFrame   = AVAudioFramePosition(end   * Double(file.length))
@@ -153,25 +159,13 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
-    // MARK: - Pitch
-
-    func setPitch(semitones: Float, cents: Float) {
-        pitchSemitones  = semitones
-        pitchCents      = cents
-        timePitch.pitch = semitones * 100 + cents
-    }
-
-    func resetPitch() { setPitch(semitones: 0, cents: 0) }
-
     // MARK: - Private
 
     /// Disconnects and reconnects the processing graph so AVAudioEngine
     /// re-derives node formats from the current hardware rate on next start.
     private func reconnectGraph() {
         engine.disconnectNodeOutput(playerNode)
-        engine.disconnectNodeOutput(timePitch)
-        engine.connect(playerNode, to: timePitch,            format: nil)
-        engine.connect(timePitch,  to: engine.mainMixerNode, format: nil)
+        engine.connect(playerNode, to: engine.mainMixerNode, format: nil)
     }
 
     /// Starts the engine and captures the hardware output sample rate.
@@ -245,10 +239,19 @@ final class AudioPlayer: ObservableObject {
                     self.scheduleSegment(from: loopStart, to: loopEnd)
                     // Override the seekFrame set inside scheduleSegment so that
                     // updatePosition() computes the correct position immediately.
-                    self.seekFrame    = loopStart - capturedSampleTime
+                    // capturedSampleTime is in the hardware (output) rate; scale to
+                    // the file's native rate so both sides of the subtraction match.
+                    if let file = self.audioFile {
+                        let rateRatio = file.fileFormat.sampleRate / (self.playerNode.lastRenderTime?.sampleRate ?? file.fileFormat.sampleRate)
+                        let scaledCaptured = AVAudioFramePosition(Double(capturedSampleTime) * rateRatio)
+                        self.seekFrame = loopStart - scaledCaptured
+                    } else {
+                        self.seekFrame = loopStart - capturedSampleTime
+                    }
                     self.playPosition = self.selectionStart ?? 0
                     if !self.playerNode.isPlaying { self.playerNode.play() }
                 } else {
+                    self.playerNode.stop()
                     self.isPlaying    = false
                     self.playPosition = self.selectionStart ?? 0
                     self.seekFrame    = 0

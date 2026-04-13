@@ -56,7 +56,8 @@ struct WaveformView: View {
                         var path = Path()
                         for i in startIdx..<endIdx {
                             let x   = CGFloat(i - startIdx) * step + step / 2
-                            let amp = CGFloat(channelPeaks[i]) * (bandHeight / 2) * 0.9
+                            let amp = min(CGFloat(channelPeaks[i]) * CGFloat(player.volume), 1.0)
+                                        * (bandHeight / 2) * 0.9
                             path.move(to:    CGPoint(x: x, y: midY - amp))
                             path.addLine(to: CGPoint(x: x, y: midY + amp))
                         }
@@ -197,7 +198,7 @@ struct WaveformView: View {
                         dragStart = nil
                         if abs(val.location.x - val.startLocation.x) < 4 {
                             player.seek(to: frac)
-                            if playOnClick { player.play() }
+                            if playOnClick && !player.isPlaying { player.play() }
                         }
                     }
             )
@@ -211,7 +212,7 @@ struct WaveformView: View {
             }
             .onTapGesture { location in
                 player.seek(to: toFileFrac(location.x / geo.size.width))
-                if playOnClick { player.play() }
+                if playOnClick && !player.isPlaying { player.play() }
             }
 
             .onAppear { loadPeaks(width: Int(geo.size.width)) }

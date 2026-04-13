@@ -14,22 +14,30 @@ struct WaveformGenerator {
     ///   - targetSamples: Number of buckets per channel (= pixel width of the waveform view)
     /// - Returns: Array of channels, each containing Float values in 0...1
     static func peaks(for url: URL, targetSamples: Int) async throws -> [[Float]] {
-        let asset  = AVURLAsset(url: url)
-        let reader = try AVAssetReader(asset: asset)
+        let asset = AVURLAsset(url: url)
 
         let tracks = try await asset.loadTracks(withMediaType: .audio)
         guard let track = tracks.first else { throw WaveformError.noAudioTrack }
 
-        // Determine channel count from format description
-        let formatDescs = try await track.load(.formatDescriptions)
+        // Load format description and duration simultaneously
+        async let formatDescs = track.load(.formatDescriptions)
+        async let duration     = asset.load(.duration)
+
         let channelCount: Int
-        if let desc = formatDescs.first {
+        var nativeSampleRate: Double = 44100
+        if let desc = try await formatDescs.first {
             let basicDesc = CMAudioFormatDescriptionGetStreamBasicDescription(desc)
-            channelCount = Int(basicDesc?.pointee.mChannelsPerFrame ?? 1)
+            channelCount     = Int(basicDesc?.pointee.mChannelsPerFrame ?? 1)
+            nativeSampleRate = basicDesc?.pointee.mSampleRate ?? 44100
         } else {
             channelCount = 1
         }
 
+        // Compute bucket size from duration so we never need to accumulate all samples
+        let totalFrames    = max(1, Int(CMTimeGetSeconds(try await duration) * nativeSampleRate))
+        let framesPerBucket = max(1, totalFrames / targetSamples)
+
+        let reader = try AVAssetReader(asset: asset)
         let outputSettings: [String: Any] = [
             AVFormatIDKey:               kAudioFormatLinearPCM,
             AVLinearPCMBitDepthKey:      32,
@@ -40,58 +48,55 @@ struct WaveformGenerator {
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: outputSettings)
         output.alwaysCopiesSampleData = false
         reader.add(output)
-
         guard reader.startReading() else { throw WaveformError.readerFailed }
 
-        // Collect all raw interleaved float samples
-        var rawSamples: [Float] = []
-        while let buffer = output.copyNextSampleBuffer(),
-              let block = CMSampleBufferGetDataBuffer(buffer) {
-            let length = CMBlockBufferGetDataLength(block)
-            let count  = length / MemoryLayout<Float>.size
-            var ptr: UnsafeMutablePointer<Int8>?
-            CMBlockBufferGetDataPointer(block, atOffset: 0,
-                                        lengthAtOffsetOut: nil,
-                                        totalLengthOut: nil,
-                                        dataPointerOut: &ptr)
-            if let p = ptr {
-                let floats = UnsafeBufferPointer<Float>(
-                    start: UnsafeRawPointer(p).assumingMemoryBound(to: Float.self),
-                    count: count)
-                rawSamples.append(contentsOf: floats)
-            }
-        }
-
-        guard !rawSamples.isEmpty else {
-            return Array(repeating: [Float](repeating: 0, count: targetSamples), count: channelCount)
-        }
-
-        // De-interleave: compute peak per bucket per channel using Accelerate with stride
-        let frameCount = rawSamples.count / channelCount
-        let bucketSize = max(1, frameCount / targetSamples)
+        // Stream: accumulate peaks per bucket without holding all decoded audio in RAM.
+        // Peak memory usage is O(targetSamples × channelCount) instead of O(fileFrames).
         var allChannelPeaks = [[Float]](
             repeating: [Float](repeating: 0, count: targetSamples),
             count: channelCount)
+        var bucketIdx      = 0
+        var framesInBucket = 0
 
-        rawSamples.withUnsafeBufferPointer { buf in
-            for ch in 0..<channelCount {
-                for i in 0..<targetSamples {
-                    let frameStart = i * bucketSize
-                    let frameEnd   = min(frameStart + bucketSize, frameCount)
-                    guard frameStart < frameEnd else { break }
-                    var maxVal: Float = 0
-                    // vDSP_maxmgv with stride = channelCount walks only this channel's samples
+        while let sampleBuffer = output.copyNextSampleBuffer(),
+              let block = CMSampleBufferGetDataBuffer(sampleBuffer) {
+
+            let byteCount  = CMBlockBufferGetDataLength(block)
+            let frameCount = byteCount / (MemoryLayout<Float>.size * channelCount)
+            guard frameCount > 0 else { continue }
+
+            var dataPtr: UnsafeMutablePointer<Int8>?
+            CMBlockBufferGetDataPointer(block, atOffset: 0,
+                                        lengthAtOffsetOut: nil,
+                                        totalLengthOut: nil,
+                                        dataPointerOut: &dataPtr)
+            guard let raw = dataPtr else { continue }
+            let floatPtr = UnsafeRawPointer(raw).assumingMemoryBound(to: Float.self)
+
+            var frameOffset = 0
+            while frameOffset < frameCount, bucketIdx < targetSamples {
+                let chunk = min(framesPerBucket - framesInBucket, frameCount - frameOffset)
+                // vDSP_maxmgv with stride = channelCount picks only this channel's samples
+                for ch in 0..<channelCount {
+                    var chMax: Float = 0
                     vDSP_maxmgv(
-                        buf.baseAddress!.advanced(by: frameStart * channelCount + ch),
+                        floatPtr.advanced(by: frameOffset * channelCount + ch),
                         vDSP_Stride(channelCount),
-                        &maxVal,
-                        vDSP_Length(frameEnd - frameStart))
-                    allChannelPeaks[ch][i] = maxVal
+                        &chMax,
+                        vDSP_Length(chunk))
+                    allChannelPeaks[ch][bucketIdx] = max(allChannelPeaks[ch][bucketIdx], chMax)
+                }
+                framesInBucket += chunk
+                frameOffset    += chunk
+                if framesInBucket >= framesPerBucket {
+                    bucketIdx      += 1
+                    framesInBucket  = 0
                 }
             }
+            if bucketIdx >= targetSamples { break }
         }
 
-        // Normalise all channels together so relative levels between channels are preserved
+        // Normalise all channels together so relative L/R levels are preserved
         var globalMax: Float = 0
         for ch in 0..<channelCount {
             var chMax: Float = 0

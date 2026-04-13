@@ -6,6 +6,11 @@ final class FolderScanner {
     private let libraryService: LibraryService
     private var watchers: [String: FSEventsWatcher] = [:]
 
+    /// Called on the MainActor when a full folder scan begins.
+    var onScanStarted: ((String) -> Void)?
+    /// Called on the MainActor when a full folder scan completes.
+    var onScanFinished: ((String) -> Void)?
+
     init(libraryService: LibraryService) {
         self.libraryService = libraryService
     }
@@ -42,6 +47,7 @@ final class FolderScanner {
     // MARK: - Private
 
     private func scanFolder(path: String, force: Bool) async {
+        await MainActor.run { onScanStarted?(path) }
         print("[FolderScanner] scanFolder start: \(path)")
         let fm  = FileManager.default
         let url = URL(fileURLWithPath: path)
@@ -64,6 +70,7 @@ final class FolderScanner {
             await libraryService.ingestFile(at: fileURL, force: force)
         }
         print("[FolderScanner] scanFolder done — \(count) files scanned, \(audioCount) audio files ingested")
+        await MainActor.run { onScanFinished?(path) }
     }
 
     private func handleEvents(paths: [String], flags: [FSEventStreamEventFlags]) {

@@ -6,6 +6,17 @@ enum RIFFError: Error {
     case invalidChunk
 }
 
+// MARK: - Streaming WAV metadata (no full-file load)
+
+struct WAVMetadata {
+    var sampleRate: Int?
+    var bitDepth: Int?
+    var channels: Int?
+    var duration: Double?
+    var bextData: Data?
+    var ixmlData: Data?
+}
+
 struct RIFFChunk {
     let fourCC: String
     let offset: Int     // byte offset of chunk DATA (after the 8-byte header)
@@ -13,6 +24,71 @@ struct RIFFChunk {
 }
 
 struct RIFFParser {
+    /// Streams only the header chunks of a WAV file via FileHandle.
+    /// Reads fmt (technical metadata), bext, and iXML without loading audio data.
+    /// For a 5 GB file this reads only the first few KB instead of mapping everything.
+    static func readWAVMetadata(at url: URL) -> WAVMetadata {
+        var result = WAVMetadata()
+        guard let handle = FileHandle(forReadingAtPath: url.path) else { return result }
+        defer { try? handle.close() }
+
+        // RIFF/WAVE header (12 bytes)
+        let header = handle.readData(ofLength: 12)
+        guard header.count == 12,
+              String(bytes: header[0..<4], encoding: .isoLatin1) == "RIFF",
+              String(bytes: header[8..<12], encoding: .isoLatin1) == "WAVE"
+        else { return result }
+
+        var blockAlign: Int = 0
+
+        while true {
+            let chunkHeader = handle.readData(ofLength: 8)
+            guard chunkHeader.count == 8 else { break }
+            let fourCC = String(bytes: chunkHeader[0..<4], encoding: .isoLatin1) ?? ""
+            let size   = Int(chunkHeader.loadLE(UInt32.self, at: 4))
+            guard size >= 0 else { break }
+            let paddedSize = size + (size & 1)
+
+            if fourCC == "fmt " {
+                let fmtData = handle.readData(ofLength: min(size, 40))
+                if fmtData.count >= 16 {
+                    let ch  = Int(fmtData.loadLE(UInt16.self, at: 2))
+                    let sr  = Int(fmtData.loadLE(UInt32.self, at: 4))
+                    let ba  = Int(fmtData.loadLE(UInt16.self, at: 12))
+                    let bps = Int(fmtData.loadLE(UInt16.self, at: 14))
+                    result.sampleRate = sr
+                    result.bitDepth   = bps > 0 ? bps : nil
+                    result.channels   = ch > 0 ? ch : nil
+                    blockAlign        = ba
+                }
+                // Skip any remaining fmt bytes
+                let read = min(size, 40)
+                if paddedSize > read {
+                    handle.seek(toFileOffset: handle.offsetInFile + UInt64(paddedSize - read))
+                }
+
+            } else if fourCC == "data" {
+                // Compute duration from data size and format, then stop — don't seek into audio data
+                if let sr = result.sampleRate, sr > 0, blockAlign > 0 {
+                    result.duration = Double(size) / Double(sr * blockAlign)
+                }
+                break
+
+            } else if fourCC == "bext" {
+                result.bextData = handle.readData(ofLength: size)
+                if size & 1 == 1 { handle.seek(toFileOffset: handle.offsetInFile + 1) }
+
+            } else if fourCC == "iXML" {
+                result.ixmlData = handle.readData(ofLength: size)
+                if size & 1 == 1 { handle.seek(toFileOffset: handle.offsetInFile + 1) }
+
+            } else {
+                handle.seek(toFileOffset: handle.offsetInFile + UInt64(paddedSize))
+            }
+        }
+        return result
+    }
+
     /// Parse all top-level chunks from a WAV file's raw Data.
     static func chunks(in data: Data) throws -> [RIFFChunk] {
         guard data.count >= 12 else { throw RIFFError.truncated }

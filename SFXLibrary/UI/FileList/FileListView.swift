@@ -40,6 +40,20 @@ struct FileListView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
                 PanelHeader(title: "Browser")
+                if env.isScanning {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.55)
+                            .frame(width: 14, height: 14)
+                        Text("Scanning… \(env.audioFiles.count) files found")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.accentColor.opacity(0.07))
+                }
                 SearchBar(text: $vm.searchQuery, scope: $vm.searchScope)
                     .padding(8)
                     .background(.bar)
@@ -51,7 +65,6 @@ struct FileListView: View {
                     .foregroundColor(.secondary)
             }
         }
-        .navigationTitle("Library")
         .onChange(of: selectedID) { _, newID in
             selectedFile = newID.flatMap { id in env.audioFiles.first { $0.id == id } }
         }

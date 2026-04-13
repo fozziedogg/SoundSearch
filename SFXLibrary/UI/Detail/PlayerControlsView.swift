@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct PlayerControlsView: View {
     @EnvironmentObject var player: AudioPlayer
@@ -28,6 +29,24 @@ struct PlayerControlsView: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.secondary)
                     .frame(width: 60, alignment: .trailing)
+            }
+
+            // Volume row  (slider goes to 200% — above 100% boosts beyond unity)
+            HStack(spacing: 8) {
+                Image(systemName: player.volume < 0.01 ? "speaker.slash" :
+                                  player.volume < 0.4  ? "speaker.wave.1" :
+                                  player.volume < 0.75 ? "speaker.wave.2" : "speaker.wave.3")
+                    .font(.system(size: 11))
+                    .foregroundColor(player.volume > 1.0 ? .orange : .secondary)
+                    .frame(width: 16)
+                VolumeSlider(value: $player.volume, range: 0...2) {
+                    player.volume = 1.0
+                }
+                .help("Double-click to reset to unity")
+                Text(String(format: "%d%%", Int(player.volume * 100)))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(player.volume > 1.0 ? .orange : .secondary)
+                    .frame(width: 36, alignment: .trailing)
             }
 
             // Playback options row
@@ -86,5 +105,54 @@ struct PlayerControlsView: View {
         let m  = s / 60
         let se = s % 60
         return String(format: "%d:%02d.%03d", m, se, ms)
+    }
+}
+
+// MARK: - Volume slider (NSSlider subclass to catch double-click)
+
+private struct VolumeSlider: NSViewRepresentable {
+    @Binding var value: Float
+    let range: ClosedRange<Float>
+    let onDoubleClick: () -> Void
+
+    func makeNSView(context: Context) -> DoubleClickSlider {
+        let slider = DoubleClickSlider()
+        slider.minValue     = Double(range.lowerBound)
+        slider.maxValue     = Double(range.upperBound)
+        slider.floatValue   = value
+        slider.onDoubleClick = onDoubleClick
+        slider.target       = context.coordinator
+        slider.action       = #selector(Coordinator.valueChanged(_:))
+        return slider
+    }
+
+    func updateNSView(_ nsView: DoubleClickSlider, context: Context) {
+        // Only push from binding → view when the value actually differs,
+        // to avoid fighting with live drag updates.
+        if abs(nsView.floatValue - value) > 0.001 {
+            nsView.floatValue = value
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject {
+        var parent: VolumeSlider
+        init(_ parent: VolumeSlider) { self.parent = parent }
+        @objc func valueChanged(_ sender: NSSlider) { parent.value = sender.floatValue }
+    }
+
+    /// NSSlider subclass that fires a callback on double-click while letting
+    /// single-clicks through to normal slider tracking.
+    final class DoubleClickSlider: NSSlider {
+        var onDoubleClick: (() -> Void)?
+
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 {
+                onDoubleClick?()
+            } else {
+                super.mouseDown(with: event)
+            }
+        }
     }
 }

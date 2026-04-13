@@ -22,6 +22,10 @@ final class AppEnvironment {
     /// URL of the currently open database file.
     var currentDatabaseURL: URL = DatabasePool.databaseURL
 
+    /// True while one or more folder scans are in progress.
+    var isScanning: Bool = false
+    private var activeScanCount: Int = 0
+
     // MARK: - Playback preferences (persisted)
 
     var autoPlayOnSelect: Bool = UserDefaults.standard.bool(forKey: "autoPlayOnSelect") {
@@ -80,6 +84,51 @@ final class AppEnvironment {
     }
 
     // MARK: - Database Management
+
+    /// Renames the current database file in-place (same directory, new filename).
+    func renameDatabase(to newName: String) {
+        let safeName = newName.hasSuffix(".sqlite") ? newName : newName + ".sqlite"
+        let dir    = currentDatabaseURL.deletingLastPathComponent()
+        let newURL = dir.appendingPathComponent(safeName)
+        guard newURL.path != currentDatabaseURL.path else { return }
+
+        let oldURL = currentDatabaseURL
+
+        // Fold WAL back into the main file so only one file needs renaming.
+        try? db.write { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
+
+        // Stop observations and watchers so nothing holds GRDB write locks.
+        filesObservation  = nil
+        foldersObservation = nil
+        folderScanner.stopAll()
+
+        // DatabasePool holds the file open via multiple file descriptors.
+        // We must replace self.db with a throwaway pool pointing elsewhere
+        // BEFORE touching the files on disk — otherwise SQLite logs "vnode renamed
+        // while in use" and the process crashes with a disk I/O error.
+        let tempURL = dir.appendingPathComponent(".sfxlib_rename_\(UUID().uuidString).sqlite")
+        // swiftlint:disable:next force_try
+        if let tempPool = try? DatabasePool(path: tempURL.path) {
+            self.db = tempPool   // old pool is now released; its fds are closed
+        }
+
+        // Rename the real files now that no pool holds them open.
+        for suffix in ["", "-wal", "-shm"] {
+            let old = oldURL.path + suffix
+            let new = newURL.path + suffix
+            if FileManager.default.fileExists(atPath: old) {
+                try? FileManager.default.moveItem(atPath: old, toPath: new)
+            }
+        }
+
+        // Open the renamed database (releases the temp pool) and restart everything.
+        switchToDatabase(at: newURL)
+
+        // Temp pool is now closed — clean up its files.
+        for suffix in ["", "-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: tempURL.path + suffix)
+        }
+    }
 
     /// Exports the current database to a user-chosen location.
     func saveDatabase() {
@@ -172,15 +221,7 @@ final class AppEnvironment {
     // MARK: - Private
 
     private func startObservations(db: DatabasePool, ls: LibraryService, scanner: FolderScanner) {
-        let filesObs = ValueObservation.tracking { db in
-            try AudioFile.order(AudioFile.Columns.filename).fetchAll(db)
-        }
-        filesObservation = filesObs.start(
-            in: db,
-            scheduling: .async(onQueue: .main),
-            onError: { error in print("[AppEnv] files observation error: \(error)") },
-            onChange: { [weak self] files in self?.audioFiles = files }
-        )
+        startFilesObservation(db: db)
 
         let foldersObs = ValueObservation.tracking { db in
             try WatchedFolder.fetchAll(db)
@@ -192,10 +233,58 @@ final class AppEnvironment {
             onChange: { [weak self] folders in self?.watchedFolders = folders }
         )
 
+        // Wire scan progress callbacks before starting watchers.
+        // Pause the files observation while scanning so 50k individual upserts
+        // don't each trigger a full table re-fetch (O(n²) rebuilds).
+        // One reload fires when all scans finish.
+        scanner.onScanStarted = { [weak self] _ in
+            guard let self else { return }
+            if self.activeScanCount == 0 {
+                self.filesObservation = nil   // pause
+            }
+            self.activeScanCount += 1
+            self.isScanning = true
+        }
+        scanner.onScanFinished = { [weak self] _ in
+            guard let self else { return }
+            self.activeScanCount = max(0, self.activeScanCount - 1)
+            if self.activeScanCount == 0 {
+                self.isScanning = false
+                self.startFilesObservation(db: self.db)   // one reload, then resume watching
+            }
+        }
+
         // Resume watching any folders that were added in a previous session
         let existing = (try? ls.fetchWatchedFolders()) ?? []
         for folder in existing {
             scanner.startWatching(path: folder.path)
         }
+    }
+
+    /// Starts (or restarts) the files observation.
+    /// Excludes the `ixml_raw` and `waveform_peaks` blob columns so the in-memory
+    /// array doesn't balloon for large libraries (ixmlRaw alone can be several KB/file).
+    private func startFilesObservation(db: DatabasePool) {
+        let sql = """
+            SELECT id, file_url, bookmark_data, filename, file_size, mtime, format,
+                   duration, sample_rate, bit_depth, channels, lufs,
+                   bwf_description, bwf_originator, bwf_scene, bwf_take,
+                   bwf_time_ref_low, bwf_time_ref_high, origination_date,
+                   tape_name, ixml_note, ucs_category, ucs_sub_category,
+                   NULL as ixml_raw,
+                   notes, star_rating,
+                   NULL as waveform_peaks,
+                   date_added, last_modified
+            FROM audio_files ORDER BY filename
+            """
+        let obs = ValueObservation.tracking { db in
+            try AudioFile.fetchAll(db, sql: sql)
+        }
+        filesObservation = obs.start(
+            in: db,
+            scheduling: .async(onQueue: .main),
+            onError: { error in print("[AppEnv] files observation error: \(error)") },
+            onChange: { [weak self] files in self?.audioFiles = files }
+        )
     }
 }

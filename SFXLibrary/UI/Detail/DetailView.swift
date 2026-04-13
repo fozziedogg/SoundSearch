@@ -1,10 +1,13 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Preview panel (waveform + playback controls)
 
 struct PreviewView: View {
     @Environment(AppEnvironment.self) var env
     let file: AudioFile
+
+    @State private var waveformHeight: CGFloat = 80
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -14,10 +17,13 @@ struct PreviewView: View {
                          mtime: file.mtime,
                          playOnClick: env.playOnWaveformClick)
                 .environmentObject(env.audioPlayer)
-                .frame(height: 80)
+                .frame(height: waveformHeight)
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .id(file.id)
+
+            WaveformResizeHandle(height: $waveformHeight)
+                .padding(.horizontal, 16)
 
             WaveformDragBar(file: file)
                 .environmentObject(env.audioPlayer)
@@ -30,11 +36,7 @@ struct PreviewView: View {
                 .environment(env)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-
-            PitchControlView()
-                .environmentObject(env.audioPlayer)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+                .padding(.bottom, 4)
 
             Spacer(minLength: 0)
         }
@@ -123,6 +125,52 @@ struct PanelHeader: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(Color.black.opacity(0.25))
+    }
+}
+
+// MARK: - Waveform resize handle
+
+private struct WaveformResizeHandle: View {
+    @Binding var height: CGFloat
+    @State private var isHovering = false
+    @State private var dragBase: CGFloat = 0
+
+    private let minHeight: CGFloat = 40
+    private let maxHeight: CGFloat = 400
+
+    var body: some View {
+        ZStack {
+            // Hit area (taller than the visible line for easier grabbing)
+            Color.clear
+                .frame(height: 8)
+                .contentShape(Rectangle())
+
+            // Visual indicator
+            RoundedRectangle(cornerRadius: 1)
+                .fill(isHovering ? Color.accentColor.opacity(0.6) : Color.white.opacity(0.12))
+                .frame(width: 32, height: 2)
+        }
+        .onHover { hovering in
+            isHovering = hovering
+            if hovering {
+                NSCursor.resizeUpDown.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { val in
+                    if val.translation.height == val.predictedEndTranslation.height
+                        && dragBase == 0 {
+                        dragBase = height
+                    }
+                    if dragBase == 0 { dragBase = height }
+                    let proposed = dragBase + val.translation.height
+                    height = min(max(proposed, minHeight), maxHeight)
+                }
+                .onEnded { _ in dragBase = 0 }
+        )
     }
 }
 

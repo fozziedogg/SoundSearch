@@ -7,6 +7,8 @@ struct SFXLibraryApp: App {
     @State private var env = AppEnvironment()
     @State private var showDeleteConfirmation = false
     @State private var addFolderAfterDelete = false
+    @State private var showRenameDialog = false
+    @State private var pendingDatabaseName: String = ""
     /// Mirrors env.currentDatabaseURL.lastPathComponent — updated via .onChange so commands can read it.
     @State private var currentDBName: String = ""
 
@@ -32,6 +34,17 @@ struct SFXLibraryApp: App {
                 } message: {
                     Text("This will permanently delete the current library database. All file records, tags, and metadata will be lost. This cannot be undone.")
                 }
+                .alert("Rename Database", isPresented: $showRenameDialog) {
+                    TextField("Name", text: $pendingDatabaseName)
+                    Button("Rename") {
+                        let name = pendingDatabaseName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !name.isEmpty else { return }
+                        env.renameDatabase(to: name)
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("Enter a new name for the database file. The .sqlite extension will be added automatically if omitted.")
+                }
         }
         .windowStyle(.titleBar)
 
@@ -48,6 +61,16 @@ struct SFXLibraryApp: App {
                     .disabled(true)
 
                 Divider()
+
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([env.currentDatabaseURL])
+                }
+
+                Button("Rename Database…") {
+                    pendingDatabaseName = env.currentDatabaseURL
+                        .deletingPathExtension().lastPathComponent
+                    showRenameDialog = true
+                }
 
                 Button("Open Database…") {
                     env.openDatabase()

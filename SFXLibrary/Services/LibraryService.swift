@@ -1,5 +1,4 @@
 import Foundation
-import AVFoundation
 import GRDB
 
 /// Orchestrates ingesting files from disk into the database,
@@ -59,49 +58,42 @@ final class LibraryService {
             lastModified:  Date()
         )
 
-        // Read technical metadata via AVURLAsset
-        let asset = AVURLAsset(url: url)
-        if let track = try? await asset.loadTracks(withMediaType: .audio).first {
-            let format = try? await track.load(.formatDescriptions).first
-            if let asbd = format.flatMap({ CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee }) {
-                file.sampleRate = Int(asbd.mSampleRate)
-                file.bitDepth   = Int(asbd.mBitsPerChannel)
-                file.channels   = Int(asbd.mChannelsPerFrame)
-            }
-        }
-        if let duration = try? await asset.load(.duration) {
-            file.duration = CMTimeGetSeconds(duration)
-        }
-
-        // Read BWF/iXML for WAV files
         let ext = url.pathExtension.lowercased()
+
         if ext == "wav" {
-            if let data = try? Data(contentsOf: url, options: .mappedIfSafe),
-               let chunks = try? RIFFParser.chunks(in: data) {
-                // BEXT
-                if let bextChunk = chunks.first(where: { $0.fourCC == "bext" }) {
-                    let chunkData = data.subdata(in: bextChunk.offset..<bextChunk.offset + bextChunk.size)
-                    if let bext = try? BEXTChunk.parse(from: chunkData) {
-                        file.bwfDescription  = Self.ptSafe(bext.description)
-                        file.bwfOriginator   = bext.originator
-                        file.bwfTimeRefLow   = Int64(bext.timeReferenceLow)
-                        file.bwfTimeRefHigh  = Int64(bext.timeReferenceHigh)
-                        file.originationDate = bext.originationDate
-                    }
-                }
-                // iXML
-                if let ixmlChunk = chunks.first(where: { $0.fourCC == "iXML" }) {
-                    let chunkData = data.subdata(in: ixmlChunk.offset..<ixmlChunk.offset + ixmlChunk.size)
-                    let fields      = iXMLChunk.parse(from: chunkData)
-                    file.bwfScene      = fields.scene          ?? ""
-                    file.bwfTake       = fields.take           ?? ""
-                    file.tapeName      = fields.tapeName       ?? ""
-                    file.ixmlNote      = fields.note           ?? ""
-                    file.ucsCategory   = fields.ucsCategory    ?? ""
-                    file.ucsSubCategory = fields.ucsSubCategory ?? ""
-                    file.ixmlRaw       = String(data: chunkData, encoding: .utf8)
-                }
+            // Single streaming FileHandle pass — reads only header chunks, never the audio data.
+            // Avoids mapping/loading potentially gigabyte-sized files into memory.
+            let wav = RIFFParser.readWAVMetadata(at: url)
+            file.sampleRate = wav.sampleRate
+            file.bitDepth   = wav.bitDepth
+            file.channels   = wav.channels
+            file.duration   = wav.duration
+
+            if let bextData = wav.bextData,
+               let bext = try? BEXTChunk.parse(from: bextData) {
+                file.bwfDescription  = Self.ptSafe(bext.description)
+                file.bwfOriginator   = bext.originator
+                file.bwfTimeRefLow   = Int64(bext.timeReferenceLow)
+                file.bwfTimeRefHigh  = Int64(bext.timeReferenceHigh)
+                file.originationDate = bext.originationDate
             }
+            if let ixmlData = wav.ixmlData {
+                let fields = iXMLChunk.parse(from: ixmlData)
+                file.bwfScene       = fields.scene           ?? ""
+                file.bwfTake        = fields.take            ?? ""
+                file.tapeName       = fields.tapeName        ?? ""
+                file.ixmlNote       = fields.note            ?? ""
+                file.ucsCategory    = fields.ucsCategory     ?? ""
+                file.ucsSubCategory = fields.ucsSubCategory  ?? ""
+                file.ixmlRaw        = String(data: ixmlData, encoding: .utf8)
+            }
+        } else {
+            // AIFF / other: AudioToolbox reads only the file header, not audio data
+            let meta = AIFFReader.read(url: url)
+            file.sampleRate = meta.sampleRate.map { Int($0) }
+            file.bitDepth   = meta.bitDepth
+            file.channels   = meta.channels
+            file.duration   = meta.duration
         }
 
         try? fileRepo.upsert(&file)
