@@ -50,10 +50,8 @@ final class LibraryService {
             ixmlNote:        "",
             ucsCategory:     "",
             ucsSubCategory:  "",
-            ixmlRaw:    nil,
             notes:      "",
             starRating: 0,
-            waveformPeaks: nil,
             dateAdded:     Date(),
             lastModified:  Date()
         )
@@ -85,7 +83,6 @@ final class LibraryService {
                 file.ixmlNote       = fields.note            ?? ""
                 file.ucsCategory    = fields.ucsCategory     ?? ""
                 file.ucsSubCategory = fields.ucsSubCategory  ?? ""
-                file.ixmlRaw        = String(data: ixmlData, encoding: .utf8)
             }
         } else {
             // AIFF / other: AudioToolbox reads only the file header, not audio data

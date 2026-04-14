@@ -30,12 +30,9 @@ struct AudioFile: Identifiable, Hashable, Codable, FetchableRecord, MutablePersi
     var ixmlNote: String            // iXML NOTE
     var ucsCategory: String         // iXML CATEGORY
     var ucsSubCategory: String      // iXML SUBCATEGORY
-    var ixmlRaw: String?
-
     // DB-only custom metadata
     var notes: String
     var starRating: Int             // 0–5
-    var waveformPeaks: Data?        // serialised [Float] blob
     var dateAdded: Date
     var lastModified: Date
 
@@ -59,9 +56,7 @@ struct AudioFile: Identifiable, Hashable, Codable, FetchableRecord, MutablePersi
         case ixmlNote        = "ixml_note"
         case ucsCategory     = "ucs_category"
         case ucsSubCategory  = "ucs_sub_category"
-        case ixmlRaw         = "ixml_raw"
         case starRating      = "star_rating"
-        case waveformPeaks   = "waveform_peaks"
         case dateAdded       = "date_added"
         case lastModified    = "last_modified"
     }

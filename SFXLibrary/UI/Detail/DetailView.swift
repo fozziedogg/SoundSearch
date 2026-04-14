@@ -8,6 +8,7 @@ struct PreviewView: View {
     let file: AudioFile
 
     @State private var waveformHeight: CGFloat = 80
+    @State private var fileNotFound: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -46,12 +47,25 @@ struct PreviewView: View {
             .scrollIndicators(.visible)
         }
         .onAppear {
-            env.audioPlayer.load(url: URL(fileURLWithPath: file.fileURL))
-            if env.autoPlayOnSelect { env.audioPlayer.play() }
+            if FileManager.default.fileExists(atPath: file.fileURL) {
+                env.audioPlayer.load(url: URL(fileURLWithPath: file.fileURL))
+                if env.autoPlayOnSelect { env.audioPlayer.play() }
+            } else {
+                fileNotFound = true
+            }
         }
         .onChange(of: file.fileURL) { _, newURL in
-            env.audioPlayer.load(url: URL(fileURLWithPath: newURL))
-            if env.autoPlayOnSelect { env.audioPlayer.play() }
+            if FileManager.default.fileExists(atPath: newURL) {
+                env.audioPlayer.load(url: URL(fileURLWithPath: newURL))
+                if env.autoPlayOnSelect { env.audioPlayer.play() }
+            } else {
+                fileNotFound = true
+            }
+        }
+        .alert("File Not Found", isPresented: $fileNotFound) {
+            Button("OK") { }
+        } message: {
+            Text("\"\(file.filename)\" could not be found at its recorded location. The file may have been moved or deleted.")
         }
     }
 }

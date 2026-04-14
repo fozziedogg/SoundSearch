@@ -6,11 +6,22 @@ struct AudioFileRow: Identifiable {
     let file: AudioFile
     var id: Int64 { file.id ?? 0 }
 
+    // Pre-computed at init — avoids a URL allocation per cell per table render.
+    let displayName: String
+    let libraryName: String
+
     // Sort keys for optional numeric fields — nil sorts to bottom (–1 / 0).
     var durationSort:   Double { file.duration  ?? -1 }
     var sampleRateSort: Int    { file.sampleRate ?? 0 }
     var bitDepthSort:   Int    { file.bitDepth   ?? 0 }
     var channelSort:    Int    { file.channels   ?? 0 }
+
+    init(file: AudioFile) {
+        self.file = file
+        let url       = URL(fileURLWithPath: file.fileURL)
+        displayName   = url.deletingPathExtension().lastPathComponent
+        libraryName   = url.deletingLastPathComponent().lastPathComponent
+    }
 }
 
 // MARK: - Display helpers on AudioFile

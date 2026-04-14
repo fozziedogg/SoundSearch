@@ -1,8 +1,6 @@
 import Foundation
 
-/// Two-level cache for waveform peaks:
-/// 1. In-memory NSCache (fast, cleared on memory pressure)
-/// 2. Serialised blob in audio_files.waveform_peaks (survives app restarts)
+/// In-memory cache for waveform peaks (NSCache, cleared on memory pressure).
 final class ThumbnailCache {
     static let shared = ThumbnailCache()
 

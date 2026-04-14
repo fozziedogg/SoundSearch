@@ -83,11 +83,15 @@ final class AppEnvironment {
     /// Increments on every database switch — used as a SwiftUI `.id` to force full UI rebuild.
     var databaseEpoch: Int = 0
 
+    /// Paths of watched folders where the disk file count differs from the DB count.
+    var foldersWithChanges: [String] = []
+
     @ObservationIgnored private var db: DatabasePool
     @ObservationIgnored private var browseTask: Task<Void, Never>?
     @ObservationIgnored private var foldersObservation: AnyDatabaseCancellable?
     @ObservationIgnored private var filterTask: Task<Void, Never>?
     @ObservationIgnored private var observationGeneration: Int = 0
+    @ObservationIgnored private var launchCheckDone: Bool = false
 
     private static let lastDBPathKey = "lastDatabasePath"
 
@@ -274,6 +278,8 @@ final class AppEnvironment {
         foldersObservation = nil
         observationGeneration += 1
         databaseEpoch += 1
+        foldersWithChanges = []
+        launchCheckDone = false
 
         // Update URL and persist immediately — title bar and menu reflect the new
         // name regardless of whether the pool setup below succeeds.
@@ -299,6 +305,58 @@ final class AppEnvironment {
         startObservations(db: newDB, ls: ls, scanner: scanner)
     }
 
+    // MARK: - Folder change detection
+
+    /// Rescans all folders that were flagged as changed.
+    func rescanChangedFolders() {
+        let paths = foldersWithChanges
+        foldersWithChanges = []
+        for path in paths { folderScanner.scan(path: path) }
+    }
+
+    /// Rescans a single folder and removes it from the changed list.
+    func rescanFolder(path: String) {
+        foldersWithChanges.removeAll { $0 == path }
+        folderScanner.scan(path: path)
+    }
+
+    /// Counts audio files on disk per folder and compares to DB counts.
+    /// Collects all changed paths; runs entirely on a background thread.
+    private func checkForFolderChanges(folders: [WatchedFolder]) {
+        let currentDB = db
+        Task.detached(priority: .background) { [weak self] in
+            var changed: [String] = []
+            for folder in folders {
+                let diskCount = Self.countAudioFiles(in: folder.path)
+                let dbCount   = (try? await currentDB.read { db in
+                    try Int.fetchOne(db,
+                        sql: "SELECT COUNT(*) FROM audio_files WHERE file_url LIKE ?",
+                        arguments: ["\(folder.path)/%"]) ?? 0
+                }) ?? 0
+                if diskCount != dbCount { changed.append(folder.path) }
+            }
+            if !changed.isEmpty {
+                await MainActor.run { self?.foldersWithChanges = changed }
+            }
+        }
+    }
+
+    /// Fast recursive count of WAV/AIFF files — reads only filenames, no file content.
+    private static func countAudioFiles(in path: String) -> Int {
+        let url = URL(fileURLWithPath: path)
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+        var count = 0
+        for case let fileURL as URL in enumerator {
+            let ext = fileURL.pathExtension.lowercased()
+            if ext == "wav" || ext == "aif" || ext == "aiff" { count += 1 }
+        }
+        return count
+    }
+
     // MARK: - Private
 
     private func startObservations(db: DatabasePool, ls: LibraryService, scanner: FolderScanner) {
@@ -315,6 +373,10 @@ final class AppEnvironment {
             onChange: { [weak self] folders in
                 guard let self, self.observationGeneration == gen else { return }
                 self.watchedFolders = folders
+                if !self.launchCheckDone && !folders.isEmpty {
+                    self.launchCheckDone = true
+                    self.checkForFolderChanges(folders: folders)
+                }
             }
         )
 
@@ -374,10 +436,7 @@ final class AppEnvironment {
                    bwf_description, bwf_originator, bwf_scene, bwf_take,
                    bwf_time_ref_low, bwf_time_ref_high, origination_date,
                    tape_name, ixml_note, ucs_category, ucs_sub_category,
-                   NULL as ixml_raw,
-                   notes, star_rating,
-                   NULL as waveform_peaks,
-                   date_added, last_modified
+                   notes, star_rating, date_added, last_modified
             FROM audio_files \(whereClause) ORDER BY filename
             LIMIT \(limit)
             """
@@ -389,17 +448,16 @@ final class AppEnvironment {
 
         browseTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            let files = (try? await db.read { db in
-                try AudioFile.fetchAll(db, sql: sql, arguments: fileArgs)
-            }) ?? []
-            let count = (try? await db.read { db in
-                try Int.fetchOne(db, sql: countSQL, arguments: countArgs) ?? 0
-            }) ?? 0
+            guard let result = try? await db.read({ db -> ([AudioFile], Int) in
+                let files = try AudioFile.fetchAll(db, sql: sql, arguments: fileArgs)
+                let count = try Int.fetchOne(db, sql: countSQL, arguments: countArgs) ?? 0
+                return (files, count)
+            }) else { return }
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard self.observationGeneration == gen else { return }
-                self.audioFiles          = files
-                self.totalAudioFileCount = count
+                self.audioFiles          = result.0
+                self.totalAudioFileCount = result.1
             }
         }
     }

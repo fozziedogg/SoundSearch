@@ -163,6 +163,4 @@ struct FolderTreeRow: View {
 enum SidebarItem: Hashable {
     case allFiles
     case folder(String)
-    case tag(String)
-    case category(Int64)
 }

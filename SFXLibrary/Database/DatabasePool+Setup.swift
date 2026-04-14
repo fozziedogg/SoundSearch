@@ -207,6 +207,13 @@ extension DatabasePool {
             """)
         }
 
+        migrator.registerMigration("v3_drop_blob_columns") { db in
+            // waveform_peaks: ThumbnailCache is memory-only; column was never read back.
+            // ixml_raw: individual iXML fields are stored in separate columns; raw XML not needed.
+            try db.execute(sql: "ALTER TABLE audio_files DROP COLUMN ixml_raw")
+            try db.execute(sql: "ALTER TABLE audio_files DROP COLUMN waveform_peaks")
+        }
+
         try migrator.migrate(pool)
         return pool
     }

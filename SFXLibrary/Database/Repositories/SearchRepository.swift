@@ -17,8 +17,8 @@ final class SearchRepository {
                 format: String? = nil,
                 minStars: Int = 0,
                 limit: Int = 200,
-                offset: Int = 0) throws -> [AudioFile] {
-        try db.read { db in
+                offset: Int = 0) async throws -> [AudioFile] {
+        try await db.read { db in
             let folderClause = folderFilter != nil ? "AND audio_files.file_url LIKE ?" : ""
             let folderArg: String? = folderFilter.map { "\($0)/%" }
 

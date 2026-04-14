@@ -11,6 +11,7 @@ struct FileListView: View {
     @State private var columnCustomization = TableColumnCustomization<AudioFileRow>()
     @State private var sortOrder: [KeyPathComparator<AudioFileRow>] = []
     @FocusState private var searchFocused: Bool
+    @State private var showChangesSheet = false
 
     private var displayedRows: [AudioFileRow] {
         let files = vm.searchQuery.isEmpty ? env.audioFiles : vm.searchResults
@@ -43,7 +44,26 @@ struct FileListView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
                 if showHeader { PanelHeader(title: "Browser") }
-                if env.isScanning {
+                if !env.foldersWithChanges.isEmpty && !env.isScanning {
+                    Button { showChangesSheet = true } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.yellow)
+                                .font(.system(size: 10))
+                            Text("Folder changes detected — click for details")
+                                .font(.system(size: 10))
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.yellow.opacity(0.08))
+                    }
+                    .buttonStyle(.plain)
+                } else if env.isScanning {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             ProgressView()
@@ -115,14 +135,18 @@ struct FileListView: View {
             .keyboardShortcut("f", modifiers: .command)
             .hidden()
         }
+        .sheet(isPresented: $showChangesSheet) {
+            FolderChangesSheet(isPresented: $showChangesSheet)
+                .environment(env)
+        }
     }
 
     // MARK: - Column group A  (name, description, duration, SR, bit, ch, format)
 
     @TableColumnBuilder<AudioFileRow, KeyPathComparator<AudioFileRow>>
     private var columnsA: some TableColumnContent<AudioFileRow, KeyPathComparator<AudioFileRow>> {
-        TableColumn("Name", value: \.file.displayName) { row in
-            Text(row.file.displayName).font(.system(size: 12)).lineLimit(1)
+        TableColumn("Name", value: \.displayName) { row in
+            Text(row.displayName).font(.system(size: 12)).lineLimit(1)
         }
         .customizationID("name")
 
@@ -187,8 +211,8 @@ struct FileListView: View {
         }
         .width(min: 40, ideal: 80).customizationID("ixmlNote")
 
-        TableColumn("Library", value: \.file.libraryName) { row in
-            label11(row.file.libraryName)
+        TableColumn("Library", value: \.libraryName) { row in
+            label11(row.libraryName)
         }
         .width(min: 60, ideal: 90).customizationID("library")
 
@@ -222,5 +246,81 @@ struct FileListView: View {
         let m     = total / 60
         let sec   = total % 60
         return String(format: "%d:%02d", m, sec)
+    }
+}
+
+// MARK: - Folder changes sheet
+
+private struct FolderChangesSheet: View {
+    @Environment(AppEnvironment.self) var env
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+
+            // Header
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.yellow)
+                Text("Folder Changes Detected")
+                    .font(.headline)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+
+            Divider()
+
+            Text("The following folders have a different number of audio files on disk than in the library. Rescan to update.")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .padding(.horizontal)
+                .padding(.top, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Per-folder rows
+            List(env.foldersWithChanges, id: \.self) { path in
+                HStack(spacing: 10) {
+                    Image(systemName: "folder.fill")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 13))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(URL(fileURLWithPath: path).lastPathComponent)
+                            .font(.system(size: 13))
+                        Text(path)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer()
+                    Button("Rescan Folder") {
+                        env.rescanFolder(path: path)
+                        if env.foldersWithChanges.isEmpty { isPresented = false }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .padding(.vertical, 2)
+            }
+            .listStyle(.inset)
+
+            Divider()
+
+            // Footer
+            HStack {
+                Button("Continue without Rescanning") {
+                    env.foldersWithChanges = []
+                    isPresented = false
+                }
+                Spacer()
+                Button("Rescan All") {
+                    env.rescanChangedFolders()
+                    isPresented = false
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+        }
+        .frame(width: 460, height: 320)
     }
 }

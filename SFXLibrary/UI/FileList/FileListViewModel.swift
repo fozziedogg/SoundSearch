@@ -45,10 +45,10 @@ final class FileListViewModel: ObservableObject {
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
             isSearching = true
-            searchResults = (try? repo.search(query: searchQuery,
-                                               scope: searchScope,
-                                               folderFilter: folderFilter,
-                                               limit: 200, offset: 0)) ?? []
+            searchResults = (try? await repo.search(query: searchQuery,
+                                                    scope: searchScope,
+                                                    folderFilter: folderFilter,
+                                                    limit: 200, offset: 0)) ?? []
             isSearching = false
         }
     }
