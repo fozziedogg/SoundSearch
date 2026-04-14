@@ -1,10 +1,15 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Waveform view
+
 struct WaveformView: View {
     let url:         URL
     let mtime:       Double
     let playOnClick: Bool
+    var waveColor:   Color = .accentColor
+
+    private let waveBackground = Color(white: 0.07)
 
     @EnvironmentObject var player: AudioPlayer
 
@@ -61,7 +66,7 @@ struct WaveformView: View {
                             path.move(to:    CGPoint(x: x, y: midY - amp))
                             path.addLine(to: CGPoint(x: x, y: midY + amp))
                         }
-                        ctx.stroke(path, with: .color(.accentColor.opacity(0.8)),
+                        ctx.stroke(path, with: .color(waveColor.opacity(0.85)),
                                    style: StrokeStyle(lineWidth: max(1, step * 0.6)))
                     }
 
@@ -76,7 +81,7 @@ struct WaveformView: View {
                                    style: StrokeStyle(lineWidth: 0.5))
                     }
                 }
-                .background(Color.black.opacity(0.3))
+                .background(waveBackground)
                 .cornerRadius(4)
 
                 // ── Selection region ─────────────────────────────────────────
@@ -89,15 +94,15 @@ struct WaveformView: View {
                         let cS = max(0, vS)
                         let cE = min(1, vE)
                         Rectangle()
-                            .fill(Color.accentColor.opacity(0.25))
+                            .fill(waveColor.opacity(0.25))
                             .frame(width: w * CGFloat(cE - cS))
                             .offset(x:    w * CGFloat(cS))
                         Rectangle()
-                            .fill(Color.accentColor)
+                            .fill(waveColor)
                             .frame(width: 2)
                             .offset(x: w * CGFloat(cS))
                         Rectangle()
-                            .fill(Color.accentColor)
+                            .fill(waveColor)
                             .frame(width: 2)
                             .offset(x: w * CGFloat(cE) - 2)
                     }
@@ -107,7 +112,7 @@ struct WaveformView: View {
                 let vPlay = toViewFrac(player.playPosition)
                 if vPlay > 0 {
                     Rectangle()
-                        .fill(Color.accentColor.opacity(0.12))
+                        .fill(waveColor.opacity(0.15))
                         .frame(width: geo.size.width * CGFloat(min(1, vPlay)))
                 }
 

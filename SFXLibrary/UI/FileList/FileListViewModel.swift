@@ -37,6 +37,10 @@ final class FileListViewModel: ObservableObject {
 
     func search(repo: SearchRepository, folderFilter: String? = nil) async {
         debounceTask?.cancel()
+        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else {
+            searchResults = []
+            return
+        }
         debounceTask = Task {
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }

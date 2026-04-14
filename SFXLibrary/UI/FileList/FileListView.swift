@@ -5,6 +5,7 @@ struct FileListView: View {
     @Environment(AppEnvironment.self) var env
     @StateObject private var vm = FileListViewModel()
     @Binding var selectedFile: AudioFile?
+    var showHeader: Bool = true
 
     @State private var selectedID: Int64? = nil
     @State private var columnCustomization = TableColumnCustomization<AudioFileRow>()
@@ -38,9 +39,10 @@ struct FileListView: View {
                     }
             }
         }
+        .scrollIndicators(.visible)
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
-                PanelHeader(title: "Browser")
+                if showHeader { PanelHeader(title: "Browser") }
                 if env.isScanning {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
@@ -64,16 +66,19 @@ struct FileListView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(Color.accentColor.opacity(0.07))
-                } else if env.totalAudioFileCount > AppEnvironment.browseLimit {
+                } else {
+                    let capped = env.totalAudioFileCount > AppEnvironment.browseLimit
                     HStack(spacing: 4) {
-                        Text("Showing first \(AppEnvironment.browseLimit) of \(env.totalAudioFileCount) files — search to find others")
+                        Text(capped
+                             ? "Showing \(env.audioFiles.count) of \(env.totalAudioFileCount) records — search to find others"
+                             : "Showing \(env.audioFiles.count) of \(env.totalAudioFileCount) records")
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                         Spacer()
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(Color.yellow.opacity(0.08))
+                    .background(capped ? Color.yellow.opacity(0.08) : Color.clear)
                 }
                 SearchBar(text: $vm.searchQuery, scope: $vm.searchScope, isFocused: $searchFocused)
                     .padding(8)
@@ -101,9 +106,14 @@ struct FileListView: View {
             Task { await vm.search(repo: env.searchRepository, folderFilter: env.folderFilter) }
         }
         .background {
-            Button("") { searchFocused = true }
-                .keyboardShortcut("f", modifiers: .command)
-                .hidden()
+            Button("") {
+                searchFocused = true
+                DispatchQueue.main.async {
+                    NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+                }
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .hidden()
         }
     }
 

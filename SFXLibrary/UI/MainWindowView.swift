@@ -5,6 +5,12 @@ struct MainWindowView: View {
     @Environment(AppEnvironment.self) var env
     @State private var selectedFile: AudioFile?
     @State private var showFileInfo: Bool = true
+    @State private var detailHeight: CGFloat = 300
+    @State private var fileInfoHeight: CGFloat = 180
+
+    private let minDetail: CGFloat  = 180
+    private let minBrowser: CGFloat = 140
+    private let dividerHeight: CGFloat = 28   // height of the Browser header/handle
 
     private var windowTitle: String {
         let dbName = env.currentDatabaseURL.deletingPathExtension().lastPathComponent
@@ -21,31 +27,62 @@ struct MainWindowView: View {
         NavigationSplitView {
             SidebarView()
         } detail: {
-            VSplitView {
-                // Top pane: Preview above File Info (File Info collapsible)
-                Group {
-                    if let file = selectedFile {
-                        VStack(spacing: 0) {
-                            PreviewView(file: file)
-                            Divider()
-                            FileInfoView(file: file, isExpanded: $showFileInfo)
-                                .frame(minHeight: showFileInfo ? 120 : 0)
-                        }
-                    } else {
-                        Text("Select a file")
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                }
-                .frame(minHeight: 200)
+            GeometryReader { geo in
+                let total    = geo.size.height
+                let clamped  = max(minDetail, min(total - dividerHeight - minBrowser, detailHeight))
 
-                // Bottom pane: Browser
-                FileListView(selectedFile: $selectedFile)
-                    .frame(minHeight: 160)
+                VStack(spacing: 0) {
+                    // Top pane — Preview + File Info
+                    Group {
+                        if let file = selectedFile {
+                            VStack(spacing: 0) {
+                                PreviewView(file: file)
+                                    .frame(maxHeight: .infinity)
+                                FileInfoView(
+                                    file: file,
+                                    isExpanded: $showFileInfo,
+                                    onHeaderDrag: { delta in
+                                        let minFI: CGFloat = 80
+                                        let maxFI = max(minFI, clamped - 120)
+                                        if !showFileInfo {
+                                            // Collapsed: drag up to expand
+                                            if delta < -10 {
+                                                withAnimation(.easeInOut(duration: 0.18)) { showFileInfo = true }
+                                            }
+                                        } else {
+                                            let proposed = fileInfoHeight - delta
+                                            if proposed < minFI - 30 {
+                                                withAnimation(.easeInOut(duration: 0.18)) { showFileInfo = false }
+                                            } else {
+                                                fileInfoHeight = max(minFI, min(maxFI, proposed))
+                                            }
+                                        }
+                                    }
+                                )
+                                .frame(height: showFileInfo
+                                       ? max(80, min(fileInfoHeight, clamped - 120))
+                                       : nil)
+                            }
+                        } else {
+                            Text("Select a file")
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                    .frame(height: clamped)
+
+                    // Draggable Browser header — acts as both title and resize handle
+                    BrowserDivider { delta in
+                        detailHeight = max(minDetail,
+                                          min(total - dividerHeight - minBrowser,
+                                              detailHeight + delta))
+                    }
+
+                    // Bottom pane — Browser (header supplied by BrowserDivider above)
+                    FileListView(selectedFile: $selectedFile, showHeader: false)
+                }
             }
         }
-        // Force full rebuild of all child @State when the database changes.
-        // This resets sidebar selection, search text, expanded folders, etc.
         .id(env.databaseEpoch)
         .navigationSplitViewStyle(.balanced)
         .navigationTitle(windowTitle)
@@ -59,5 +96,45 @@ struct MainWindowView: View {
                 selectedFile = nil
             }
         }
+    }
+}
+
+// MARK: - Draggable Browser header / pane divider
+
+private struct BrowserDivider: View {
+    let onDrag: (CGFloat) -> Void
+
+    @State private var prevTranslation: CGFloat = 0
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack {
+            Text("Browser")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+                .tracking(1.5)
+            Spacer()
+            Image(systemName: "arrow.up.and.down")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(.secondary.opacity(isHovering ? 0.7 : 0.3))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(isHovering ? 0.35 : 0.25))
+        .onHover { hovering in
+            isHovering = hovering
+            if hovering { NSCursor.resizeUpDown.push() }
+            else        { NSCursor.pop() }
+        }
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { val in
+                    let delta = val.translation.height - prevTranslation
+                    prevTranslation = val.translation.height
+                    onDrag(delta)
+                }
+                .onEnded { _ in prevTranslation = 0 }
+        )
     }
 }

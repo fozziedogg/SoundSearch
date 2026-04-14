@@ -20,7 +20,7 @@ final class AppEnvironment {
     var totalAudioFileCount: Int = 0
 
     /// Maximum rows loaded into the browse list. Search results are separate and always <= 200.
-    static let browseLimit = 5_000
+    static let browseLimit = 1_000
 
     /// When set, the browse list and search are limited to files under this path prefix.
     var folderFilter: String? = nil {
@@ -64,13 +64,28 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(dragExportMode.rawValue, forKey: "dragExportMode") }
     }
 
+    var waveformColor: Color = {
+        let r = UserDefaults.standard.object(forKey: "wfColorR") as? Double
+        let g = UserDefaults.standard.object(forKey: "wfColorG") as? Double
+        let b = UserDefaults.standard.object(forKey: "wfColorB") as? Double
+        if let r, let g, let b { return Color(red: r, green: g, blue: b) }
+        return Color.accentColor
+    }() {
+        didSet {
+            if let c = NSColor(waveformColor).usingColorSpace(.sRGB) {
+                UserDefaults.standard.set(Double(c.redComponent),   forKey: "wfColorR")
+                UserDefaults.standard.set(Double(c.greenComponent), forKey: "wfColorG")
+                UserDefaults.standard.set(Double(c.blueComponent),  forKey: "wfColorB")
+            }
+        }
+    }
+
     /// Increments on every database switch — used as a SwiftUI `.id` to force full UI rebuild.
     var databaseEpoch: Int = 0
 
     @ObservationIgnored private var db: DatabasePool
-    @ObservationIgnored private var filesObservation: AnyDatabaseCancellable?
+    @ObservationIgnored private var browseTask: Task<Void, Never>?
     @ObservationIgnored private var foldersObservation: AnyDatabaseCancellable?
-    @ObservationIgnored private var countObservation: AnyDatabaseCancellable?
     @ObservationIgnored private var filterTask: Task<Void, Never>?
     @ObservationIgnored private var observationGeneration: Int = 0
 
@@ -133,9 +148,9 @@ final class AppEnvironment {
         try? db.write { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
 
         // Stop observations and watchers so nothing holds GRDB write locks.
-        filesObservation   = nil
+        browseTask?.cancel()
+        browseTask         = nil
         foldersObservation = nil
-        countObservation   = nil
 
         // Release every strong reference to the original pool before touching files.
         // self.db, libraryService, and searchRepository all hold the pool — all three
@@ -232,7 +247,8 @@ final class AppEnvironment {
         try? db.write { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
 
         // Stop observations and watchers before touching the pool.
-        filesObservation  = nil
+        browseTask?.cancel()
+        browseTask         = nil
         foldersObservation = nil
 
         // Delete the old files (the open pool still holds its fd — safe on Unix).
@@ -253,9 +269,9 @@ final class AppEnvironment {
         folderFilter = nil      // clear stale filter; didSet may create a new filterTask
         filterTask?.cancel()    // cancel any task just created by the folderFilter reset
         filterTask = nil
-        filesObservation   = nil
+        browseTask?.cancel()
+        browseTask         = nil
         foldersObservation = nil
-        countObservation   = nil
         observationGeneration += 1
         databaseEpoch += 1
 
@@ -314,8 +330,8 @@ final class AppEnvironment {
         scanner.onScanStarted = { [weak self] _ in
             guard let self else { return }
             if self.activeScanCount == 0 {
-                self.filesObservation = nil   // pause — avoids O(n²) table rebuilds
-                self.countObservation = nil   // pause — fires on every write otherwise
+                self.browseTask?.cancel()     // pause — avoids O(n²) table rebuilds
+                self.browseTask = nil
                 self.currentScanFile  = ""
                 self.scannedFileCount = 0
             }
@@ -339,12 +355,11 @@ final class AppEnvironment {
         // No auto-scan on open — use Rescan to pick up changes manually.
     }
 
-    /// Starts (or restarts) the files observation.
-    /// Excludes blob columns to keep the in-memory array lean.
-    /// Capped at browseLimit rows. Filtered to folderFilter path prefix when set.
+    /// Fetches the browse list in the background and delivers results to the main actor.
+    /// Replaces any in-flight fetch. Capped at browseLimit rows.
+    /// Filtered to folderFilter path prefix when set.
     private func startFilesObservation(db: DatabasePool) {
-        filesObservation  = nil
-        countObservation  = nil
+        browseTask?.cancel()
 
         let gen    = observationGeneration
         let limit  = AppEnvironment.browseLimit
@@ -366,34 +381,26 @@ final class AppEnvironment {
             FROM audio_files \(whereClause) ORDER BY filename
             LIMIT \(limit)
             """
-        let obs = ValueObservation.tracking { db in
-            try AudioFile.fetchAll(db, sql: sql, arguments: fileArgs)
-        }
-        filesObservation = obs.start(
-            in: db,
-            scheduling: .async(onQueue: .main),
-            onError: { error in print("[AppEnv] files observation error: \(error)") },
-            onChange: { [weak self] files in
-                guard let self, self.observationGeneration == gen else { return }
-                self.audioFiles = files
-            }
-        )
 
         let countSQL = filter != nil
             ? "SELECT COUNT(*) FROM audio_files WHERE file_url LIKE ?"
             : "SELECT COUNT(*) FROM audio_files"
         let countArgs: StatementArguments = filter != nil ? ["\(filter!)/%"] : []
-        let countObs = ValueObservation.tracking { db in
-            try Int.fetchOne(db, sql: countSQL, arguments: countArgs) ?? 0
-        }
-        countObservation = countObs.start(
-            in: db,
-            scheduling: .async(onQueue: .main),
-            onError: { _ in },
-            onChange: { [weak self] count in
-                guard let self, self.observationGeneration == gen else { return }
+
+        browseTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            let files = (try? await db.read { db in
+                try AudioFile.fetchAll(db, sql: sql, arguments: fileArgs)
+            }) ?? []
+            let count = (try? await db.read { db in
+                try Int.fetchOne(db, sql: countSQL, arguments: countArgs) ?? 0
+            }) ?? 0
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard self.observationGeneration == gen else { return }
+                self.audioFiles          = files
                 self.totalAudioFileCount = count
             }
-        )
+        }
     }
 }

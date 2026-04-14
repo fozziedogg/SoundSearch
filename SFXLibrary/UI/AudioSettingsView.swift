@@ -43,6 +43,12 @@ struct AudioSettingsView: View {
             }
 
             Section {
+                ColorPicker("Waveform colour", selection: $bEnv.waveformColor)
+            } header: {
+                Text("Waveform")
+            }
+
+            Section {
                 Picker("Selection export", selection: $bEnv.dragExportMode) {
                     ForEach(DragExportMode.allCases, id: \.self) { mode in
                         Text(mode.label).tag(mode)
@@ -58,7 +64,7 @@ struct AudioSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 310)
+        .frame(width: 460, height: 380)
         .onAppear { refreshDevices() }
     }
 

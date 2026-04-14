@@ -13,32 +13,37 @@ struct PreviewView: View {
         VStack(alignment: .leading, spacing: 0) {
             PanelHeader(title: "Preview")
 
-            WaveformView(url: URL(fileURLWithPath: file.fileURL),
-                         mtime: file.mtime,
-                         playOnClick: env.playOnWaveformClick)
-                .environmentObject(env.audioPlayer)
-                .frame(height: waveformHeight)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .id(file.id)
+            // Scrollable content — waveform + resize handle + controls all scroll together
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 0) {
+                    WaveformView(url: URL(fileURLWithPath: file.fileURL),
+                                 mtime: file.mtime,
+                                 playOnClick: env.playOnWaveformClick,
+                                 waveColor: env.waveformColor)
+                        .environmentObject(env.audioPlayer)
+                        .frame(height: waveformHeight)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .id(file.id)
 
-            WaveformResizeHandle(height: $waveformHeight)
-                .padding(.horizontal, 16)
+                    WaveformResizeHandle(height: $waveformHeight)
+                        .padding(.horizontal, 16)
 
-            WaveformDragBar(file: file)
-                .environmentObject(env.audioPlayer)
-                .frame(height: 26)
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
+                    WaveformDragBar(file: file)
+                        .environmentObject(env.audioPlayer)
+                        .frame(height: 26)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
 
-            PlayerControlsView()
-                .environmentObject(env.audioPlayer)
-                .environment(env)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .padding(.bottom, 4)
-
-            Spacer(minLength: 0)
+                    PlayerControlsView()
+                        .environmentObject(env.audioPlayer)
+                        .environment(env)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .padding(.bottom, 4)
+                }
+            }
+            .scrollIndicators(.visible)
         }
         .onAppear {
             env.audioPlayer.load(url: URL(fileURLWithPath: file.fileURL))
@@ -57,10 +62,14 @@ struct FileInfoView: View {
     @Environment(AppEnvironment.self) var env
     let file: AudioFile
     @Binding var isExpanded: Bool
+    /// Called with the cumulative drag delta (positive = drag down) so the parent can resize.
+    var onHeaderDrag: ((CGFloat) -> Void)? = nil
+
+    @State private var prevDragTranslation: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header with expand/collapse toggle
+            // Header with expand/collapse toggle — also acts as resize drag handle
             HStack {
                 Text("File Info")
                     .font(.system(size: 10, weight: .semibold))
@@ -68,6 +77,11 @@ struct FileInfoView: View {
                     .textCase(.uppercase)
                     .tracking(1.5)
                 Spacer()
+                if onHeaderDrag != nil {
+                    Image(systemName: "arrow.up.and.down")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.secondary.opacity(0.4))
+                }
                 Button {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         isExpanded.toggle()
@@ -76,6 +90,8 @@ struct FileInfoView: View {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
+                        .frame(width: 28, height: 14)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(isExpanded ? "Hide File Info" : "Show File Info")
@@ -83,10 +99,24 @@ struct FileInfoView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(Color.black.opacity(0.25))
+            .onHover { hovering in
+                guard onHeaderDrag != nil else { return }
+                if hovering { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+            }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { val in
+                        guard let onHeaderDrag else { return }
+                        let delta = val.translation.height - prevDragTranslation
+                        prevDragTranslation = val.translation.height
+                        onHeaderDrag(delta)
+                    }
+                    .onEnded { _ in prevDragTranslation = 0 }
+            )
 
             if isExpanded {
                 Divider()
-                ScrollView {
+                ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 0) {
                         MetadataFormView(file: file)
                             .padding(16)
@@ -103,6 +133,7 @@ struct FileInfoView: View {
                             .padding(16)
                     }
                 }
+                .scrollIndicators(.visible)
             }
         }
     }
@@ -158,7 +189,7 @@ private struct WaveformResizeHandle: View {
                 NSCursor.pop()
             }
         }
-        .gesture(
+        .highPriorityGesture(
             DragGesture(minimumDistance: 1)
                 .onChanged { val in
                     if val.translation.height == val.predictedEndTranslation.height
