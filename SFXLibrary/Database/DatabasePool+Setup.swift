@@ -214,6 +214,13 @@ extension DatabasePool {
             try db.execute(sql: "ALTER TABLE audio_files DROP COLUMN waveform_peaks")
         }
 
+        migrator.registerMigration("v4_watched_folder_count") { db in
+            // Stores the disk file count captured at the end of the last scan.
+            // Used on launch to detect real folder changes without querying audio_files.
+            // NULL means "never scanned" — no change warning is shown until first scan completes.
+            try db.execute(sql: "ALTER TABLE watched_folders ADD COLUMN scanned_file_count INTEGER")
+        }
+
         try migrator.migrate(pool)
         return pool
     }
@@ -221,5 +228,39 @@ extension DatabasePool {
     /// Convenience: opens the default library database in ~/Documents/SFXLibrary_database/.
     static func setupShared() throws -> DatabasePool {
         try setup(at: databaseURL)
+    }
+
+    // MARK: - Global projects database (~/Library/Application Support/SoundSearch/)
+
+    static var projectsDatabaseURL: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return support
+            .appendingPathComponent("SoundSearch", isDirectory: true)
+            .appendingPathComponent("projects.sqlite")
+    }
+
+    static func setupProjectsDatabase() throws -> DatabasePool {
+        let url = projectsDatabaseURL
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let pool = try DatabasePool(path: url.path)
+        var migrator = DatabaseMigrator()
+        migrator.registerMigration("v1_projects") { db in
+            try db.create(table: "projects") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("name",       .text).notNull()
+                t.column("sort_order", .integer).notNull().defaults(to: 0)
+            }
+            try db.create(table: "project_files") { t in
+                t.column("project_id", .integer).notNull()
+                    .references("projects", onDelete: .cascade)
+                t.column("file_url",   .text).notNull()
+                t.column("date_added", .datetime).notNull()
+                t.primaryKey(["project_id", "file_url"])
+            }
+            try db.create(index: "idx_pf_project", on: "project_files", columns: ["project_id"])
+        }
+        try migrator.migrate(pool)
+        return pool
     }
 }

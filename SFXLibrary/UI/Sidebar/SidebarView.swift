@@ -1,13 +1,15 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SidebarView: View {
     @Environment(AppEnvironment.self) var env
-    @State private var selection: SidebarItem? = .allFiles
     @State private var expandedFolders: Set<String> = []
     @State private var isRescanning: Set<String> = []
+    @State private var renamingProjectID: Int64? = nil
 
     var body: some View {
-        List(selection: $selection) {
+        @Bindable var bEnv = env
+        List(selection: $bEnv.sidebarSelection) {
             Section("Library") {
                 Label("All Files", systemImage: "waveform")
                     .tag(SidebarItem.allFiles)
@@ -26,6 +28,33 @@ struct SidebarView: View {
                 }
             }
 
+            Section {
+                ForEach(env.projects) { project in
+                    ProjectRow(
+                        project: project,
+                        isRenaming: Binding(
+                            get: { renamingProjectID == project.id },
+                            set: { renamingProjectID = $0 ? project.id : nil }
+                        )
+                    )
+                    .tag(SidebarItem.project(project.id ?? 0))
+                }
+            } header: {
+                HStack {
+                    Text("Projects")
+                    Spacer()
+                    Button {
+                        if let created = env.createProject(name: "New Project") {
+                            renamingProjectID = created.id
+                            env.sidebarSelection = .project(created.id ?? 0)
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
         .listStyle(.sidebar)
         .frame(minWidth: 200)
@@ -38,10 +67,18 @@ struct SidebarView: View {
                 .disabled(env.isScanning)
             }
         }
-        .onChange(of: selection) { _, newSel in
+        .onChange(of: env.sidebarSelection) { _, newSel in
             switch newSel {
-            case .folder(let path): env.folderFilter = path
-            default:                env.folderFilter = nil
+            case .folder(let path):
+                env.activeProjectID = nil
+                env.folderFilter = path
+            case .project(let id):
+                env.folderFilter     = nil
+                env.activeProjectID  = id
+                env.trackedProjectID = id
+            default:
+                env.activeProjectID = nil
+                env.folderFilter = nil
             }
         }
     }
@@ -58,9 +95,96 @@ struct SidebarView: View {
 
     private func removeFolder(path: String) {
         try? env.libraryService.removeWatchedFolder(path: path, scanner: env.folderScanner)
-        if case .folder(let sel) = selection, sel.hasPrefix(path) {
-            selection = .allFiles
+        if case .folder(let sel) = env.sidebarSelection, sel.hasPrefix(path) {
+            env.sidebarSelection = .allFiles
         }
+    }
+}
+
+// MARK: - Project row
+
+private struct ProjectRow: View {
+    let project: Project
+    @Binding var isRenaming: Bool
+    @Environment(AppEnvironment.self) var env
+
+    @State private var editName: String = ""
+    @State private var isDropTargeted = false
+    @FocusState private var renameFocused: Bool
+
+    var body: some View {
+        // Evaluate at top level so @Observable always tracks this dependency.
+        let isTracked = env.trackedProjectID == project.id
+
+        Group {
+            if isRenaming {
+                TextField("", text: $editName)
+                    .textFieldStyle(.plain)
+                    .focused($renameFocused)
+                    .onSubmit { commit() }
+                    .onExitCommand { isRenaming = false }
+                    .onAppear {
+                        editName = project.name
+                        DispatchQueue.main.async { renameFocused = true }
+                    }
+            } else {
+                HStack(spacing: 0) {
+                    Text(project.name)
+                        .fontWeight(isTracked ? .semibold : .regular)
+                    Spacer(minLength: 6)
+                    if isTracked {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 7, height: 7)
+                            .padding(.trailing, 2)
+                    }
+                }
+                .onTapGesture(count: 2) {
+                    editName = project.name
+                    isRenaming = true
+                }
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            guard let id = project.id else { return false }
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url else { return }
+                    DispatchQueue.main.async { env.addFile(url.path, toProject: id) }
+                }
+            }
+            return !providers.isEmpty
+        }
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(
+                    isDropTargeted
+                        ? Color.accentColor.opacity(0.30)
+                        : isTracked
+                            ? Color.accentColor.opacity(0.12)
+                            : Color.clear
+                )
+        )
+        .contextMenu {
+            Button("Rename") {
+                editName = project.name
+                isRenaming = true
+            }
+            Divider()
+            Button(role: .destructive) {
+                if let id = project.id { env.deleteProject(id) }
+            } label: {
+                Label("Delete Project", systemImage: "trash")
+            }
+        }
+    }
+
+    private func commit() {
+        let trimmed = editName.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty, let id = project.id {
+            env.renameProject(id, to: trimmed)
+        }
+        isRenaming = false
     }
 }
 
@@ -163,4 +287,5 @@ struct FolderTreeRow: View {
 enum SidebarItem: Hashable {
     case allFiles
     case folder(String)
+    case project(Int64)
 }

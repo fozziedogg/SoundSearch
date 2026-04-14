@@ -60,11 +60,13 @@ final class FolderScanner {
         var audioCount = 0
         var skipped = 0
         var failures: [ScanFailure] = []
+        var foundPaths = Set<String>()
 
         for case let fileURL as URL in enumerator {
             count += 1
             guard isAudioFile(fileURL) else { continue }
             audioCount += 1
+            foundPaths.insert(fileURL.path)
 
             // Fast path: skip unchanged files.
             if !force,
@@ -89,8 +91,17 @@ final class FolderScanner {
             }
         }
 
+        // Remove DB entries for files that no longer exist on disk.
+        let dbPaths = (try? libraryService.fetchFileURLs(inFolder: path)) ?? []
+        var removed = 0
+        for dbPath in dbPaths where !foundPaths.contains(dbPath) {
+            await libraryService.removeFile(at: URL(fileURLWithPath: dbPath))
+            removed += 1
+        }
+
         let ingested = audioCount - skipped - failures.count
-        print("[FolderScanner] done — \(count) visited, \(skipped) unchanged, \(ingested) ingested, \(failures.count) errors")
+        print("[FolderScanner] done — \(count) visited, \(skipped) unchanged, \(ingested) ingested, \(removed) removed, \(failures.count) errors")
+        libraryService.updateScannedFileCount(path: path, count: audioCount)
         writeLog(scanPath: path, failures: failures)
         await MainActor.run { onScanFinished?(path) }
     }

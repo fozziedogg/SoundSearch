@@ -25,7 +25,14 @@ struct WaveformDragBar: View {
 
     var body: some View {
         dragBarShape
-            .onDrag { makeItemProvider() }
+            .overlay(
+                DragHandlerView(
+                    computeURL: { computeDeliveryURL() },
+                    onCompleted: { _ in
+                        env.addToActiveProject(fileURL: file.fileURL)
+                    }
+                )
+            )
     }
 
     // MARK: - Appearance
@@ -70,9 +77,9 @@ struct WaveformDragBar: View {
 
     private func fmt(_ t: Double) -> String { String(format: "%.3fs", t) }
 
-    // MARK: - Drag item provider
+    // MARK: - Drag URL computation
 
-    private func makeItemProvider() -> NSItemProvider {
+    func computeDeliveryURL() -> URL {
         let sourceURL    = URL(fileURLWithPath: file.fileURL)
         let selStart     = player.selectionStart
         let selEnd       = player.selectionEnd
@@ -134,10 +141,7 @@ struct WaveformDragBar: View {
         // Sanitise filename for Pro Tools (no colons, slashes, etc.)
         let finalURL = ptSafeURL(deliverURL)
         print("[Drag] delivering → \(finalURL.path)")
-
-        let provider = NSItemProvider()
-        provider.registerObject(finalURL as NSURL, visibility: .all)
-        return provider
+        return finalURL
     }
 
     /// Copies the file to a temp location with a PT-legal filename if needed.
@@ -248,4 +252,72 @@ enum DragBarHelper {
     }
 
     enum ExportError: Error { case emptySelection, bufferAllocationFailed }
+}
+
+// MARK: - Drag handler NSViewRepresentable
+
+import AppKit
+
+/// Transparent NSView overlay that initiates a drag and reports the completed NSDragOperation.
+struct DragHandlerView: NSViewRepresentable {
+    let computeURL: () -> URL
+    let onCompleted: (NSDragOperation) -> Void
+
+    func makeNSView(context: Context) -> _DragHandlerNSView {
+        _DragHandlerNSView(computeURL: computeURL, onCompleted: onCompleted)
+    }
+
+    func updateNSView(_ nsView: _DragHandlerNSView, context: Context) {
+        nsView.computeURL   = computeURL
+        nsView.onCompleted  = onCompleted
+    }
+}
+
+final class _DragHandlerNSView: NSView, NSDraggingSource {
+    var computeURL:  () -> URL
+    var onCompleted: (NSDragOperation) -> Void
+
+    init(computeURL: @escaping () -> URL, onCompleted: @escaping (NSDragOperation) -> Void) {
+        self.computeURL  = computeURL
+        self.onCompleted = onCompleted
+        super.init(frame: .zero)
+    }
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+    // Accept mouse-down so we can track drag from this view.
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        let url  = computeURL()
+        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        let imgBounds = NSRect(origin: .zero, size: NSSize(width: 48, height: 24))
+        item.setDraggingFrame(imgBounds, contents: dragImage())
+
+        beginDraggingSession(with: [item], event: event, source: self)
+    }
+
+    // MARK: NSDraggingSource
+
+    func draggingSession(_ session: NSDraggingSession,
+                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .outsideApplication ? [.copy, .link, .generic] : []
+    }
+
+    func draggingSession(_ session: NSDraggingSession,
+                         endedAt screenPoint: NSPoint,
+                         operation: NSDragOperation) {
+        DispatchQueue.main.async { [weak self] in self?.onCompleted(operation) }
+    }
+
+    // MARK: Private
+
+    private func dragImage() -> NSImage {
+        let size  = NSSize(width: 48, height: 24)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.controlAccentColor.withAlphaComponent(0.6).setFill()
+        NSBezierPath(roundedRect: NSRect(origin: .zero, size: size), xRadius: 4, yRadius: 4).fill()
+        image.unlockFocus()
+        return image
+    }
 }

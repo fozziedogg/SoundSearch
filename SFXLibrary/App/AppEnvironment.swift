@@ -86,12 +86,73 @@ final class AppEnvironment {
     /// Paths of watched folders where the disk file count differs from the DB count.
     var foldersWithChanges: [String] = []
 
+    // MARK: - Projects (global, stored in Application Support/SoundSearch)
+
+    var projects: [Project] = []
+
+    /// The currently active project. Mutually exclusive with folderFilter.
+    var activeProjectID: Int64? = nil {
+        didSet {
+            guard activeProjectID != oldValue else { return }
+            projectTask?.cancel()
+            if let id = activeProjectID {
+                let pDB = projectsDB
+                let gen = observationGeneration
+                projectTask = Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    let urls = (try? await pDB.read { db in
+                        try String.fetchAll(db,
+                            sql: "SELECT file_url FROM project_files WHERE project_id = ? ORDER BY date_added",
+                            arguments: [id])
+                    }) ?? []
+                    guard !Task.isCancelled, self.observationGeneration == gen else { return }
+                    self.activeProjectFileURLs = urls
+                    self.startFilesObservation(db: self.db)
+                }
+            } else {
+                activeProjectFileURLs = []
+                startFilesObservation(db: db)
+            }
+        }
+    }
+
+    /// The last project the user explicitly selected — used as the add target even when
+    /// browsing All Files or a folder (persists until the project is deleted or a
+    /// different project is selected). Persisted across launches.
+    var trackedProjectID: Int64? = nil {
+        didSet {
+            if let id = trackedProjectID {
+                UserDefaults.standard.set(Int(id), forKey: "trackedProjectID")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "trackedProjectID")
+            }
+        }
+    }
+
+    /// Drives the sidebar List selection. Stored here so launch code can restore it
+    /// before the first render.
+    var sidebarSelection: SidebarItem? = .allFiles
+
+    /// When true, files dragged to PT or sent via PTSL are added to the active project.
+    var autoAddToProject: Bool = {
+        guard UserDefaults.standard.object(forKey: "autoAddToProject") != nil else { return true }
+        return UserDefaults.standard.bool(forKey: "autoAddToProject")
+    }() {
+        didSet { UserDefaults.standard.set(autoAddToProject, forKey: "autoAddToProject") }
+    }
+
+    @ObservationIgnored private var sessionRestored = false
     @ObservationIgnored private var db: DatabasePool
+    @ObservationIgnored private var projectsDB: DatabasePool
+    @ObservationIgnored private var projectRepository: ProjectRepository
     @ObservationIgnored private var browseTask: Task<Void, Never>?
     @ObservationIgnored private var foldersObservation: AnyDatabaseCancellable?
+    @ObservationIgnored private var projectsObservation: AnyDatabaseCancellable?
     @ObservationIgnored private var filterTask: Task<Void, Never>?
+    @ObservationIgnored private var projectTask: Task<Void, Never>?
     @ObservationIgnored private var observationGeneration: Int = 0
     @ObservationIgnored private var launchCheckDone: Bool = false
+    @ObservationIgnored private var activeProjectFileURLs: [String] = []
 
     private static let lastDBPathKey = "lastDatabasePath"
 
@@ -114,6 +175,10 @@ final class AppEnvironment {
         let scanner = FolderScanner(libraryService: ls)
         self.folderScanner  = scanner
         self.audioPlayer    = AudioPlayer()
+
+        let pDB = try! DatabasePool.setupProjectsDatabase()
+        self.projectsDB         = pDB
+        self.projectRepository  = ProjectRepository(db: pDB)
 
         startObservations(db: db, ls: ls, scanner: scanner)
     }
@@ -280,6 +345,10 @@ final class AppEnvironment {
         databaseEpoch += 1
         foldersWithChanges = []
         launchCheckDone = false
+        projectTask?.cancel()
+        projectTask = nil
+        activeProjectFileURLs = []
+        activeProjectID = nil
 
         // Update URL and persist immediately — title bar and menu reflect the new
         // name regardless of whether the pool setup below succeeds.
@@ -305,6 +374,52 @@ final class AppEnvironment {
         startObservations(db: newDB, ls: ls, scanner: scanner)
     }
 
+    // MARK: - Project management
+
+    @discardableResult
+    func createProject(name: String) -> Project? {
+        try? projectRepository.createProject(name: name)
+    }
+
+    func renameProject(_ id: Int64, to name: String) {
+        try? projectRepository.renameProject(id, to: name)
+    }
+
+    func deleteProject(_ id: Int64) {
+        try? projectRepository.deleteProject(id)
+        if activeProjectID  == id { activeProjectID  = nil }
+        if trackedProjectID == id { trackedProjectID = nil }
+    }
+
+    /// Adds `fileURL` to the tracked project if auto-add is enabled.
+    /// Uses `trackedProjectID` so it works even when browsing All Files.
+    func addToActiveProject(fileURL: String) {
+        guard autoAddToProject, let projectId = trackedProjectID else { return }
+        try? projectRepository.addFile(fileURL: fileURL, toProject: projectId)
+        // If we're currently filtering by this project, update the live list too.
+        if activeProjectID == projectId, !activeProjectFileURLs.contains(fileURL) {
+            activeProjectFileURLs.append(fileURL)
+            startFilesObservation(db: db)
+        }
+    }
+
+    /// Adds a file to a specific project by ID (used for sidebar drag-and-drop).
+    func addFile(_ fileURL: String, toProject projectId: Int64) {
+        try? projectRepository.addFile(fileURL: fileURL, toProject: projectId)
+        if activeProjectID == projectId, !activeProjectFileURLs.contains(fileURL) {
+            activeProjectFileURLs.append(fileURL)
+            startFilesObservation(db: db)
+        }
+    }
+
+    /// Removes `fileURL` from the active project and refreshes the browse list.
+    func removeFromActiveProject(fileURL: String) {
+        guard let projectId = activeProjectID else { return }
+        try? projectRepository.removeFile(fileURL: fileURL, fromProject: projectId)
+        activeProjectFileURLs.removeAll { $0 == fileURL }
+        startFilesObservation(db: db)
+    }
+
     // MARK: - Folder change detection
 
     /// Rescans all folders that were flagged as changed.
@@ -320,20 +435,16 @@ final class AppEnvironment {
         folderScanner.scan(path: path)
     }
 
-    /// Counts audio files on disk per folder and compares to DB counts.
-    /// Collects all changed paths; runs entirely on a background thread.
+    /// Counts audio files on disk per folder and compares to the count stored after
+    /// the last scan. Folders that have never been scanned (scannedFileCount == nil)
+    /// are skipped — no spurious warning on first launch.
     private func checkForFolderChanges(folders: [WatchedFolder]) {
-        let currentDB = db
         Task.detached(priority: .background) { [weak self] in
             var changed: [String] = []
             for folder in folders {
+                guard let stored = folder.scannedFileCount else { continue }
                 let diskCount = Self.countAudioFiles(in: folder.path)
-                let dbCount   = (try? await currentDB.read { db in
-                    try Int.fetchOne(db,
-                        sql: "SELECT COUNT(*) FROM audio_files WHERE file_url LIKE ?",
-                        arguments: ["\(folder.path)/%"]) ?? 0
-                }) ?? 0
-                if diskCount != dbCount { changed.append(folder.path) }
+                if diskCount != stored { changed.append(folder.path) }
             }
             if !changed.isEmpty {
                 await MainActor.run { self?.foldersWithChanges = changed }
@@ -359,8 +470,47 @@ final class AppEnvironment {
 
     // MARK: - Private
 
+    private func startProjectsObservation() {
+        let obs = ValueObservation.tracking { db in
+            try Project.order(Column("sort_order"), Column("name")).fetchAll(db)
+        }
+        projectsObservation = obs.start(
+            in: projectsDB,
+            scheduling: .async(onQueue: .main),
+            onError: { _ in },
+            onChange: { [weak self] projects in
+                self?.projects = projects
+                self?.restoreOrCreateProjectIfNeeded(projects)
+            }
+        )
+    }
+
+    /// Called on first projects observation delivery. Restores the last active project
+    /// from UserDefaults, or creates "NEW PROJECT" if no projects exist yet.
+    private func restoreOrCreateProjectIfNeeded(_ projects: [Project]) {
+        guard !sessionRestored else { return }
+        sessionRestored = true
+
+        if projects.isEmpty {
+            if let created = createProject(name: "NEW PROJECT"), let id = created.id {
+                trackedProjectID = id
+                activeProjectID  = id
+                sidebarSelection = .project(id)
+            }
+        } else {
+            let storedID = Int64(UserDefaults.standard.integer(forKey: "trackedProjectID"))
+            let target   = projects.first(where: { $0.id == storedID }) ?? projects.first
+            if let proj = target, let id = proj.id {
+                trackedProjectID = id
+                activeProjectID  = id
+                sidebarSelection = .project(id)
+            }
+        }
+    }
+
     private func startObservations(db: DatabasePool, ls: LibraryService, scanner: FolderScanner) {
         startFilesObservation(db: db)
+        startProjectsObservation()
 
         let gen = observationGeneration
         let foldersObs = ValueObservation.tracking { db in
@@ -417,18 +567,30 @@ final class AppEnvironment {
         // No auto-scan on open — use Rescan to pick up changes manually.
     }
 
+    /// Builds the WHERE clause and arguments for the current browse filter state.
+    /// Project filter takes priority over folder filter; they are mutually exclusive in practice.
+    private func buildBrowseWhereClause() -> (String, StatementArguments) {
+        if activeProjectID != nil {
+            let urls = activeProjectFileURLs
+            guard !urls.isEmpty else { return ("WHERE 1=0", []) }
+            let placeholders = urls.map { _ in "?" }.joined(separator: ",")
+            var args: StatementArguments = []
+            urls.forEach { args += [$0] }
+            return ("WHERE file_url IN (\(placeholders))", args)
+        } else if let filter = folderFilter {
+            return ("WHERE file_url LIKE ?", ["\(filter)/%"])
+        }
+        return ("", [])
+    }
+
     /// Fetches the browse list in the background and delivers results to the main actor.
     /// Replaces any in-flight fetch. Capped at browseLimit rows.
-    /// Filtered to folderFilter path prefix when set.
     private func startFilesObservation(db: DatabasePool) {
         browseTask?.cancel()
 
-        let gen    = observationGeneration
-        let limit  = AppEnvironment.browseLimit
-        let filter = folderFilter
-
-        let whereClause = filter != nil ? "WHERE file_url LIKE ?" : ""
-        let fileArgs: StatementArguments = filter != nil ? ["\(filter!)/%"] : []
+        let gen   = observationGeneration
+        let limit = AppEnvironment.browseLimit
+        let (whereClause, queryArgs) = buildBrowseWhereClause()
 
         let sql = """
             SELECT id, file_url, bookmark_data, filename, file_size, mtime, format,
@@ -440,17 +602,13 @@ final class AppEnvironment {
             FROM audio_files \(whereClause) ORDER BY filename
             LIMIT \(limit)
             """
-
-        let countSQL = filter != nil
-            ? "SELECT COUNT(*) FROM audio_files WHERE file_url LIKE ?"
-            : "SELECT COUNT(*) FROM audio_files"
-        let countArgs: StatementArguments = filter != nil ? ["\(filter!)/%"] : []
+        let countSQL = "SELECT COUNT(*) FROM audio_files \(whereClause)"
 
         browseTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             guard let result = try? await db.read({ db -> ([AudioFile], Int) in
-                let files = try AudioFile.fetchAll(db, sql: sql, arguments: fileArgs)
-                let count = try Int.fetchOne(db, sql: countSQL, arguments: countArgs) ?? 0
+                let files = try AudioFile.fetchAll(db, sql: sql, arguments: queryArgs)
+                let count = try Int.fetchOne(db, sql: countSQL, arguments: queryArgs) ?? 0
                 return (files, count)
             }) else { return }
             guard !Task.isCancelled else { return }

@@ -51,7 +51,7 @@ struct PreviewView: View {
                 env.audioPlayer.load(url: URL(fileURLWithPath: file.fileURL))
                 if env.autoPlayOnSelect { env.audioPlayer.play() }
             } else {
-                fileNotFound = true
+                flagMissing()
             }
         }
         .onChange(of: file.fileURL) { _, newURL in
@@ -59,13 +59,32 @@ struct PreviewView: View {
                 env.audioPlayer.load(url: URL(fileURLWithPath: newURL))
                 if env.autoPlayOnSelect { env.audioPlayer.play() }
             } else {
-                fileNotFound = true
+                flagMissing()
             }
         }
         .alert("File Not Found", isPresented: $fileNotFound) {
-            Button("OK") { }
+            Button("Open Parent Folder") {
+                let parent = URL(fileURLWithPath: file.fileURL).deletingLastPathComponent()
+                NSWorkspace.shared.open(parent)
+            }
+            if let watchedPath = env.watchedFolders
+                .first(where: { file.fileURL.hasPrefix($0.path) })?.path {
+                Button("Rescan Folder") {
+                    env.rescanFolder(path: watchedPath)
+                }
+            }
+            Button("OK", role: .cancel) { }
         } message: {
             Text("\"\(file.filename)\" could not be found at its recorded location. The file may have been moved or deleted.")
+        }
+    }
+
+    private func flagMissing() {
+        fileNotFound = true
+        if let watchedPath = env.watchedFolders
+            .first(where: { file.fileURL.hasPrefix($0.path) })?.path,
+           !env.foldersWithChanges.contains(watchedPath) {
+            env.foldersWithChanges.append(watchedPath)
         }
     }
 }

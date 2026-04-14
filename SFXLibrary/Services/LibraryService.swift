@@ -100,6 +100,14 @@ final class LibraryService {
         try fileRepo.fetchAllMtimes()
     }
 
+    func fetchFileURLs(inFolder path: String) throws -> [String] {
+        try db.read { db in
+            try String.fetchAll(db,
+                sql: "SELECT file_url FROM audio_files WHERE file_url LIKE ?",
+                arguments: ["\(path)/%"])
+        }
+    }
+
     func removeFile(at url: URL) async {
         try? fileRepo.delete(fileURL: url.path)
     }
@@ -124,6 +132,14 @@ final class LibraryService {
 
     func fetchWatchedFolders() throws -> [WatchedFolder] {
         try db.read { db in try WatchedFolder.fetchAll(db) }
+    }
+
+    func updateScannedFileCount(path: String, count: Int) {
+        try? db.write { db in
+            try db.execute(
+                sql: "UPDATE watched_folders SET scanned_file_count = ?, last_scanned = ? WHERE path = ?",
+                arguments: [count, Date(), path])
+        }
     }
 
     func rescanFolder(path: String, scanner: FolderScanner) {

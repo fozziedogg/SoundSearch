@@ -49,6 +49,16 @@ struct AudioSettingsView: View {
             }
 
             Section {
+                Toggle("Auto-add to active project", isOn: $bEnv.autoAddToProject)
+            } header: {
+                Text("Projects")
+            } footer: {
+                Text("When enabled, files are automatically added to the active project whenever you drag a file to Pro Tools or use the Spot button.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Section {
                 Picker("Selection export", selection: $bEnv.dragExportMode) {
                     ForEach(DragExportMode.allCases, id: \.self) { mode in
                         Text(mode.label).tag(mode)
@@ -64,7 +74,7 @@ struct AudioSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 380)
+        .frame(width: 460, height: 460)
         .onAppear { refreshDevices() }
     }
 

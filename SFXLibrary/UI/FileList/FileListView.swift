@@ -32,10 +32,21 @@ struct FileListView: View {
         } rows: {
             ForEach(sortedRows) { row in
                 TableRow(row)
+                    .itemProvider {
+                        NSItemProvider(object: URL(fileURLWithPath: row.file.fileURL) as NSURL)
+                    }
                     .contextMenu {
                         Button("Show in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting(
                                 [URL(fileURLWithPath: row.file.fileURL)])
+                        }
+                        if env.activeProjectID != nil {
+                            Divider()
+                            Button(role: .destructive) {
+                                env.removeFromActiveProject(fileURL: row.file.fileURL)
+                            } label: {
+                                Label("Remove from Project", systemImage: "minus.circle")
+                            }
                         }
                     }
             }
@@ -123,7 +134,11 @@ struct FileListView: View {
             Task { await vm.search(repo: env.searchRepository, folderFilter: env.folderFilter) }
         }
         .onChange(of: env.folderFilter) { _, _ in
+            vm.searchQuery = ""
             Task { await vm.search(repo: env.searchRepository, folderFilter: env.folderFilter) }
+        }
+        .onChange(of: env.activeProjectID) { _, _ in
+            vm.searchQuery = ""
         }
         .background {
             Button("") {

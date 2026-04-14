@@ -83,7 +83,9 @@ struct ProToolsSpotView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(isSending || !isTimecodeValid)
 
-                DragToPTButton(file: file, timecode: timecode, frameRate: frameRate)
+                DragToPTButton(file: file, timecode: timecode, frameRate: frameRate) { _ in
+                    env.addToActiveProject(fileURL: file.fileURL)
+                }
             }
 
             if let result = sendResult {
@@ -184,6 +186,7 @@ struct ProToolsSpotView: View {
         do {
             try await env.ptslClient.spot(request)
             sendResult = .success
+            if env.autoAddToProject { env.addToActiveProject(fileURL: file.fileURL) }
         } catch {
             sendResult = .failure(error.localizedDescription)
         }
@@ -205,9 +208,11 @@ private struct DragToPTButton: View {
     let file: AudioFile
     let timecode: String
     let frameRate: FrameRate
+    let onCompleted: (NSDragOperation) -> Void
 
     var body: some View {
-        DragInitiatorViewRepresentable(file: file, timecode: timecode, frameRate: frameRate)
+        DragInitiatorViewRepresentable(file: file, timecode: timecode,
+                                       frameRate: frameRate, onCompleted: onCompleted)
             .frame(width: 120, height: 28)
     }
 }
@@ -216,26 +221,30 @@ struct DragInitiatorViewRepresentable: NSViewRepresentable {
     let file: AudioFile
     let timecode: String
     let frameRate: FrameRate
+    let onCompleted: (NSDragOperation) -> Void
 
     func makeNSView(context: Context) -> DragInitiatorNSView {
         let view = DragInitiatorNSView()
-        view.file      = file
-        view.timecode  = timecode
-        view.frameRate = frameRate
+        view.file        = file
+        view.timecode    = timecode
+        view.frameRate   = frameRate
+        view.onCompleted = onCompleted
         return view
     }
 
     func updateNSView(_ nsView: DragInitiatorNSView, context: Context) {
-        nsView.file      = file
-        nsView.timecode  = timecode
-        nsView.frameRate = frameRate
+        nsView.file        = file
+        nsView.timecode    = timecode
+        nsView.frameRate   = frameRate
+        nsView.onCompleted = onCompleted
     }
 }
 
 final class DragInitiatorNSView: NSView {
-    var file:      AudioFile?
-    var timecode:  String    = "01:00:00:00"
-    var frameRate: FrameRate = .fps25
+    var file:        AudioFile?
+    var timecode:    String    = "01:00:00:00"
+    var frameRate:   FrameRate = .fps25
+    var onCompleted: ((NSDragOperation) -> Void)?
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.controlAccentColor.withAlphaComponent(0.1).setFill()
@@ -276,5 +285,11 @@ final class DragInitiatorNSView: NSView {
 
 extension DragInitiatorNSView: NSDraggingSource {
     func draggingSession(_ session: NSDraggingSession,
-                          sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .copy }
+                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .copy }
+
+    func draggingSession(_ session: NSDraggingSession,
+                         endedAt screenPoint: NSPoint,
+                         operation: NSDragOperation) {
+        DispatchQueue.main.async { [weak self] in self?.onCompleted?(operation) }
+    }
 }
