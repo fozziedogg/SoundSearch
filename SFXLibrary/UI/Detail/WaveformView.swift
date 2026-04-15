@@ -214,6 +214,8 @@ struct WaveformView: View {
                         guard let start = dragStart else { return }
                         dragStart = nil
                         if abs(val.location.x - val.startLocation.x) < 4 {
+                            player.selectionStart = nil
+                            player.selectionEnd   = nil
                             player.seek(to: frac)
                             if playOnClick && !player.isPlaying { player.play() }
                         }
@@ -228,6 +230,8 @@ struct WaveformView: View {
                 }
             }
             .onTapGesture { location in
+                player.selectionStart = nil
+                player.selectionEnd   = nil
                 player.seek(to: toFileFrac(location.x / geo.size.width))
                 if playOnClick && !player.isPlaying { player.play() }
             }

@@ -53,7 +53,7 @@ struct PlayerControlsView: View {
             HStack(spacing: 2) {
                 Spacer()
                 optionToggle(
-                    icon: "bolt",
+                    icon: "bolt", activeIcon: "bolt.fill",
                     label: "Autoplay",
                     help: "Play automatically when a file is selected",
                     isOn: env.autoPlayOnSelect
@@ -79,11 +79,11 @@ struct PlayerControlsView: View {
     // MARK: - Helpers
 
     @ViewBuilder
-    private func optionToggle(icon: String, label: String, help: String,
+    private func optionToggle(icon: String, activeIcon: String? = nil, label: String, help: String,
                                isOn: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 3) {
-                Image(systemName: isOn ? "\(icon).fill" : icon)
+                Image(systemName: isOn ? (activeIcon ?? icon) : icon)
                 Text(label)
             }
             .font(.system(size: 10))
