@@ -1,5 +1,7 @@
 import Foundation
 import AVFoundation
+import GRPC
+import NIOPosix
 
 // MARK: - Errors
 
@@ -450,35 +452,41 @@ actor PTSLClient {
     }
 
     // MARK: - gRPC Transport
-    //
-    // TODO: Replace this stub with grpc-swift when connecting to Pro Tools.
-    //
-    // Steps to implement:
-    //   1. Add to Package.resolved:
-    //        grpc-swift      https://github.com/grpc/grpc-swift  (v2.x)
-    //        swift-protobuf  https://github.com/apple/swift-protobuf
-    //
-    //   2. Generate Swift types from PTSL.proto via protoc.
-    //
-    //   3. Replace the throw below with:
-    //
-    //        let channel = try GRPCChannelPool.with(
-    //            target: .host("localhost", port: 31416),
-    //            transportSecurity: .plaintext,
-    //            eventLoopGroup: PlatformSupport.makeEventLoopGroup(loopCount: 1)
-    //        )
-    //        let client = Ptsl_PTSLNIOClient(channel: channel)
-    //        var req = Ptsl_Request()
-    //        req.header.command   = Ptsl_CommandId(rawValue: commandId) ?? .cidNone
-    //        req.header.sessionID = sessionId ?? ""
-    //        req.requestBodyJson  = body
-    //        let response = try await client.sendGrpcRequest(req)
-    //        guard response.header.status == .completed else {
-    //            throw PTSLError.commandFailed(response.responseErrorJson)
-    //        }
-    //        return response.responseBodyJson
+
+    // Lazily created once and reused. The event loop group is intentionally
+    // kept alive for the lifetime of the actor.
+    private var _grpcClient: Ptsl_PTSLAsyncClient?
+
+    private func grpcClient() -> Ptsl_PTSLAsyncClient {
+        if let c = _grpcClient { return c }
+        let group   = PlatformSupport.makeEventLoopGroup(loopCount: 1,
+                                                          networkPreference: .best)
+        let channel = ClientConnection.insecure(group: group)
+            .connect(host: "localhost", port: 31416)
+        let client  = Ptsl_PTSLAsyncClient(channel: channel)
+        _grpcClient = client
+        return client
+    }
 
     private func sendRequest(commandId: Int, body: String) async throws -> String {
-        throw PTSLError.notImplemented
+        var header          = Ptsl_RequestHeader()
+        header.command      = Ptsl_CommandId(rawValue: commandId) ?? .cidNone
+        header.version      = Int32(ptslVersionMajor > 0 ? ptslVersionMajor : 2024)
+        header.versionMinor = Int32(ptslVersionMinor)
+        header.sessionID    = sessionId ?? ""
+
+        var req             = Ptsl_Request()
+        req.header          = header
+        req.requestBodyJson = body
+
+        let response = try await grpcClient().sendGrpcRequest(req)
+
+        guard response.header.status == .tstatusCompleted else {
+            let msg = response.responseErrorJson.isEmpty
+                ? "Command \(commandId) failed with status \(response.header.status)"
+                : response.responseErrorJson
+            throw PTSLError.commandFailed(msg)
+        }
+        return response.responseBodyJson
     }
 }

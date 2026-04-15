@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		A438E7392F8718FD00DBE776 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = A438E7382F8718FD00DBE776 /* GRDB */; };
+		A4FB80762F9045CF00E8AC63 /* SwiftProtobuf in Frameworks */ = {isa = PBXBuildFile; productRef = A4FB80752F9045CF00E8AC63 /* SwiftProtobuf */; };
+		A4FB807A2F9045CF00E8AC63 /* GRPC in Frameworks */ = {isa = PBXBuildFile; productRef = A4FB80772F9045CF00E8AC63 /* GRPC */; };
+		A4FB807B2F9045CF00E8AC63 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = A4FB80782F9045CF00E8AC63 /* NIOCore */; };
+		A4FB807C2F9045CF00E8AC63 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = A4FB80792F9045CF00E8AC63 /* NIOPosix */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +61,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				A438E7392F8718FD00DBE776 /* GRDB in Frameworks */,
+				A4FB80762F9045CF00E8AC63 /* SwiftProtobuf in Frameworks */,
+				A4FB807A2F9045CF00E8AC63 /* GRPC in Frameworks */,
+				A4FB807B2F9045CF00E8AC63 /* NIOCore in Frameworks */,
+				A4FB807C2F9045CF00E8AC63 /* NIOPosix in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -118,6 +126,10 @@
 			name = SFXLibrary;
 			packageProductDependencies = (
 				A438E7382F8718FD00DBE776 /* GRDB */,
+				A4FB80752F9045CF00E8AC63 /* SwiftProtobuf */,
+				A4FB80772F9045CF00E8AC63 /* GRPC */,
+				A4FB80782F9045CF00E8AC63 /* NIOCore */,
+				A4FB80792F9045CF00E8AC63 /* NIOPosix */,
 			);
 			productName = SFXLibrary;
 			productReference = A438E6582F8714A200DBE776 /* SFXLibrary.app */;
@@ -203,6 +215,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A438E7372F8718FD00DBE776 /* XCRemoteSwiftPackageReference "GRDB" */,
+				A4FB80732F90456500E8AC63 /* XCRemoteSwiftPackageReference "grpc-swift" */,
+				A4FB80742F9045CF00E8AC63 /* XCRemoteSwiftPackageReference "swift-protobuf" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A438E6592F8714A200DBE776 /* Products */;
@@ -624,6 +638,22 @@
 				kind = branch;
 			};
 		};
+		A4FB80732F90456500E8AC63 /* XCRemoteSwiftPackageReference "grpc-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/grpc/grpc-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
+		A4FB80742F9045CF00E8AC63 /* XCRemoteSwiftPackageReference "swift-protobuf" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-protobuf";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.36.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -631,6 +661,26 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A438E7372F8718FD00DBE776 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
+		};
+		A4FB80752F9045CF00E8AC63 /* SwiftProtobuf */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A4FB80742F9045CF00E8AC63 /* XCRemoteSwiftPackageReference "swift-protobuf" */;
+			productName = SwiftProtobuf;
+		};
+		A4FB80772F9045CF00E8AC63 /* GRPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A4FB80732F90456500E8AC63 /* XCRemoteSwiftPackageReference "grpc-swift" */;
+			productName = GRPC;
+		};
+		A4FB80782F9045CF00E8AC63 /* NIOCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A4FB80732F90456500E8AC63 /* XCRemoteSwiftPackageReference "grpc-swift" */;
+			productName = NIOCore;
+		};
+		A4FB80792F9045CF00E8AC63 /* NIOPosix */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A4FB80732F90456500E8AC63 /* XCRemoteSwiftPackageReference "grpc-swift" */;
+			productName = NIOPosix;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

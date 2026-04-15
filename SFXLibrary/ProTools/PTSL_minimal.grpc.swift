@@ -1,16 +1,14 @@
-// DO NOT EDIT.
-// Hand-written Swift gRPC client matching what protoc-gen-grpc-swift would generate for
+// Hand-written Swift gRPC client matching what protoc-gen-grpc-swift generates for
 // sdk/PTSL_minimal.proto (package ptsl, service PTSL).
 //
-// Requires grpc-swift 1.x (GRPCChannel / ClientConnection API).
+// GRPCClient protocol (grpc-swift 1.x) exposes performAsyncUnaryCall publicly.
+// The protocol only requires `channel` and `defaultCallOptions` — no interceptors.
 
 import GRPC
 import NIOCore
 import SwiftProtobuf
 
-// MARK: - Async/Await client (grpc-swift 1.x)
-
-struct Ptsl_PTSLAsyncClient {
+struct Ptsl_PTSLAsyncClient: GRPCClient {
     var channel: GRPCChannel
     var defaultCallOptions: CallOptions
 
@@ -19,18 +17,15 @@ struct Ptsl_PTSLAsyncClient {
         self.defaultCallOptions = defaultCallOptions
     }
 
-    /// Unary RPC: SendGrpcRequest
     func sendGrpcRequest(
         _ request: Ptsl_Request,
         callOptions: CallOptions? = nil
     ) async throws -> Ptsl_Response {
-        let options = callOptions ?? defaultCallOptions
-        let call: GRPCAsyncUnaryCall<Ptsl_Request, Ptsl_Response> = channel.makeAsyncUnaryCall(
+        return try await performAsyncUnaryCall(
             path: "/ptsl.PTSL/SendGrpcRequest",
             request: request,
-            callOptions: options,
+            callOptions: callOptions ?? defaultCallOptions,
             interceptors: []
         )
-        return try await call.response
     }
 }
