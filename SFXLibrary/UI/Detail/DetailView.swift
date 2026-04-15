@@ -9,47 +9,36 @@ struct PreviewView: View {
 
     @State private var waveformHeight: CGFloat = 80
     @State private var fileNotFound: Bool = false
-    @State private var waveformHovered: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PanelHeader(title: "Preview")
 
-            // Scrollable content — waveform + resize handle + controls all scroll together.
-            // scrollDisabled while the cursor is over the waveform so vertical scroll is handled
-            // by the WaveformView zoom handler instead of scrolling this panel.
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 0) {
-                    WaveformView(url: URL(fileURLWithPath: file.fileURL),
-                                 mtime: file.mtime,
-                                 playOnClick: env.playOnWaveformClick,
-                                 waveColor: env.waveformColor)
-                        .environmentObject(env.audioPlayer)
-                        .frame(height: waveformHeight)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .onHover { waveformHovered = $0 }
-                        .id(file.id)
+            WaveformView(url: URL(fileURLWithPath: file.fileURL),
+                         mtime: file.mtime,
+                         playOnClick: env.playOnWaveformClick,
+                         waveColor: env.waveformColor)
+                .environmentObject(env.audioPlayer)
+                .frame(height: waveformHeight)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .id(file.id)
 
-                    WaveformResizeHandle(height: $waveformHeight)
-                        .padding(.horizontal, 16)
+            WaveformResizeHandle(height: $waveformHeight)
+                .padding(.horizontal, 16)
 
-                    WaveformDragBar(file: file)
-                        .environmentObject(env.audioPlayer)
-                        .frame(height: 26)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 4)
+            WaveformDragBar(file: file)
+                .environmentObject(env.audioPlayer)
+                .frame(height: 26)
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
 
-                    PlayerControlsView()
-                        .environmentObject(env.audioPlayer)
-                        .environment(env)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .padding(.bottom, 4)
-                }
-            }
-            .scrollIndicators(.visible)
-            .scrollDisabled(waveformHovered)
+            PlayerControlsView()
+                .environmentObject(env.audioPlayer)
+                .environment(env)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .padding(.bottom, 4)
         }
         .onAppear {
             if FileManager.default.fileExists(atPath: file.fileURL) {

@@ -263,7 +263,7 @@ final class AudioPlayer: ObservableObject {
 
     private func startPositionTimer() {
         timer?.cancel()
-        timer = Timer.publish(every: 0.05, on: .main, in: .common)
+        timer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in self?.updatePosition() }
     }
