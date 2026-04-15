@@ -1,4 +1,58 @@
 import SwiftUI
+import AppKit
+
+// MARK: - Screen-aware colour picker (positions NSColorPanel on the same screen as the app)
+
+private final class PositioningColorWell: NSColorWell {
+    var onChange: ((NSColor) -> Void)?
+    private var panelObserver: NSObjectProtocol?
+
+    override func activate(_ exclusive: Bool) {
+        super.activate(exclusive)
+        // Move the shared colour panel to the same screen as our window.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window, let screen = window.screen else { return }
+            let panel = NSColorPanel.shared
+            var f  = panel.frame
+            let sf = screen.visibleFrame
+            f.origin.x = max(sf.minX, min(sf.maxX - f.width,  sf.midX - f.width  / 2))
+            f.origin.y = max(sf.minY, min(sf.maxY - f.height, sf.midY - f.height / 2))
+            panel.setFrameOrigin(f.origin)
+        }
+        panelObserver = NotificationCenter.default.addObserver(
+            forName: NSColorPanel.colorDidChangeNotification,
+            object: NSColorPanel.shared, queue: .main
+        ) { [weak self] _ in
+            self?.onChange?(NSColorPanel.shared.color)
+        }
+    }
+
+    override func deactivate() {
+        super.deactivate()
+        if let obs = panelObserver {
+            NotificationCenter.default.removeObserver(obs)
+            panelObserver = nil
+        }
+    }
+}
+
+private struct ScreenAwareColorPicker: NSViewRepresentable {
+    @Binding var selection: Color
+
+    func makeNSView(context: Context) -> PositioningColorWell {
+        let well = PositioningColorWell()
+        well.color = NSColor(selection)
+        return well
+    }
+
+    func updateNSView(_ well: PositioningColorWell, context: Context) {
+        if !well.isActive { well.color = NSColor(selection) }
+        let binding = $selection
+        well.onChange = { nsColor in binding.wrappedValue = Color(nsColor) }
+    }
+}
+
+// MARK: -
 
 struct AudioSettingsView: View {
     @Environment(AppEnvironment.self) var env
@@ -43,7 +97,12 @@ struct AudioSettingsView: View {
             }
 
             Section {
-                ColorPicker("Waveform colour", selection: $bEnv.waveformColor)
+                HStack {
+                    Text("Waveform colour")
+                    Spacer()
+                    ScreenAwareColorPicker(selection: $bEnv.waveformColor)
+                        .frame(width: 44, height: 26)
+                }
             } header: {
                 Text("Waveform")
             }

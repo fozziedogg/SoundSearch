@@ -9,12 +9,15 @@ struct PreviewView: View {
 
     @State private var waveformHeight: CGFloat = 80
     @State private var fileNotFound: Bool = false
+    @State private var waveformHovered: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PanelHeader(title: "Preview")
 
-            // Scrollable content — waveform + resize handle + controls all scroll together
+            // Scrollable content — waveform + resize handle + controls all scroll together.
+            // scrollDisabled while the cursor is over the waveform so vertical scroll is handled
+            // by the WaveformView zoom handler instead of scrolling this panel.
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 0) {
                     WaveformView(url: URL(fileURLWithPath: file.fileURL),
@@ -25,6 +28,7 @@ struct PreviewView: View {
                         .frame(height: waveformHeight)
                         .padding(.horizontal, 16)
                         .padding(.top, 12)
+                        .onHover { waveformHovered = $0 }
                         .id(file.id)
 
                     WaveformResizeHandle(height: $waveformHeight)
@@ -45,6 +49,7 @@ struct PreviewView: View {
                 }
             }
             .scrollIndicators(.visible)
+            .scrollDisabled(waveformHovered)
         }
         .onAppear {
             if FileManager.default.fileExists(atPath: file.fileURL) {

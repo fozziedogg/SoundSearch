@@ -54,14 +54,23 @@ struct WaveformView: View {
 
                     let channelCount = peaks.count
                     let bandHeight   = size.height / CGFloat(channelCount)
-                    let step         = size.width / CGFloat(visibleCount)
+
+                    // When peaks outnumber drawable columns, aggregate into pixel-wide buckets.
+                    let pixelCols = max(1, Int(size.width))
+                    let stride    = max(1, visibleCount / pixelCols)
+                    let drawCount = (visibleCount + stride - 1) / stride
+                    let step      = size.width / CGFloat(drawCount)
 
                     for (ch, channelPeaks) in peaks.enumerated() {
                         let midY = bandHeight * CGFloat(ch) + bandHeight / 2
                         var path = Path()
-                        for i in startIdx..<endIdx {
-                            let x   = CGFloat(i - startIdx) * step + step / 2
-                            let amp = min(CGFloat(channelPeaks[i]) * CGFloat(player.volume), 1.0)
+                        for col in 0..<drawCount {
+                            let iStart = startIdx + col * stride
+                            let iEnd   = min(startIdx + (col + 1) * stride, endIdx)
+                            var colMax: Float = 0
+                            for i in iStart..<iEnd { colMax = max(colMax, channelPeaks[i]) }
+                            let x   = CGFloat(col) * step + step / 2
+                            let amp = min(CGFloat(colMax) * CGFloat(player.volume), 1.0)
                                         * (bandHeight / 2) * 0.9
                             path.move(to:    CGPoint(x: x, y: midY - amp))
                             path.addLine(to: CGPoint(x: x, y: midY + amp))
@@ -124,7 +133,7 @@ struct WaveformView: View {
                         .offset(x: geo.size.width * CGFloat(vPlay) - 0.75)
                 }
 
-                // ── Zoom reset badge ─────────────────────────────────────────
+                // ── Zoom level badge — tap to reset ──────────────────────────
                 if zoomLevel > 1.01 {
                     VStack {
                         HStack {
@@ -135,15 +144,18 @@ struct WaveformView: View {
                                     windowStart = 0.0
                                 }
                             } label: {
-                                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.75))
-                                    .padding(5)
+                                Text(zoomLevel < 10
+                                     ? String(format: "%.1f×", zoomLevel)
+                                     : String(format: "%.0f×", zoomLevel))
+                                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.80))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 3)
                                     .background(Color.black.opacity(0.55))
                                     .clipShape(RoundedRectangle(cornerRadius: 4))
                             }
                             .buttonStyle(.plain)
-                            .help("Reset zoom  (double-click)")
+                            .help("Zoom: \(String(format: "%.1f", zoomLevel))× — click to reset")
                             .padding(5)
                         }
                         Spacer()
@@ -220,11 +232,11 @@ struct WaveformView: View {
                 if playOnClick && !player.isPlaying { player.play() }
             }
 
-            .onAppear { loadPeaks(width: Int(geo.size.width)) }
+            .onAppear { loadPeaks(width: max(Int(geo.size.width) * 8, 4096)) }
             .onChange(of: url) { _, _ in
                 zoomLevel   = 1.0
                 windowStart = 0.0
-                loadPeaks(width: Int(geo.size.width))
+                loadPeaks(width: max(Int(geo.size.width) * 8, 4096))
             }
         }
     }
@@ -238,7 +250,8 @@ struct WaveformView: View {
     private func zoom(to newZoom: Double, anchorViewFrac: Double) {
         let clamped       = max(1.0, min(newZoom, 500.0))
         let newWindowSize = 1.0 / clamped
-        let anchorFile    = toFileFrac(anchorViewFrac)
+        // Use unclamped anchor so the point under the cursor stays fixed
+        let anchorFile    = windowStart + anchorViewFrac * windowSize
         let newStart      = anchorFile - anchorViewFrac * newWindowSize
         windowStart = max(0, min(newStart, 1.0 - newWindowSize))
         zoomLevel   = clamped

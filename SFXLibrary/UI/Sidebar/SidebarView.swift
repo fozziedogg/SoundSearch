@@ -15,7 +15,7 @@ struct SidebarView: View {
                     .tag(SidebarItem.allFiles)
             }
 
-            Section("Folders") {
+            Section {
                 ForEach(env.watchedFolders) { folder in
                     FolderTreeRow(
                         path: folder.path,
@@ -26,6 +26,11 @@ struct SidebarView: View {
                         onRemove: removeFolder
                     )
                 }
+            } header: {
+                SidebarSectionHeader(title: "Folders") {
+                    env.addWatchedFolder()
+                }
+                .disabled(env.isScanning)
             }
 
             Section {
@@ -40,33 +45,16 @@ struct SidebarView: View {
                     .tag(SidebarItem.project(project.id ?? 0))
                 }
             } header: {
-                HStack {
-                    Text("Projects")
-                    Spacer()
-                    Button {
-                        if let created = env.createProject(name: "New Project") {
-                            renamingProjectID = created.id
-                            env.sidebarSelection = .project(created.id ?? 0)
-                        }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .medium))
+                SidebarSectionHeader(title: "Projects") {
+                    if let created = env.createProject(name: "New Project") {
+                        renamingProjectID = created.id
+                        env.sidebarSelection = .project(created.id ?? 0)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
         .listStyle(.sidebar)
         .frame(minWidth: 200)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: { env.addWatchedFolder() }) {
-                    Label("Add Folder", systemImage: "plus")
-                }
-                .help("Add a folder to the library")
-                .disabled(env.isScanning)
-            }
-        }
         .onChange(of: env.sidebarSelection) { _, newSel in
             switch newSel {
             case .folder(let path):
@@ -283,6 +271,31 @@ struct FolderTreeRow: View {
             .sorted()
     }
 }
+
+// MARK: - Shared section header with + button
+
+private struct SidebarSectionHeader: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(title)
+            Spacer()
+            Button(action: action) {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 4)
+        }
+    }
+}
+
+// MARK: -
 
 enum SidebarItem: Hashable {
     case allFiles
