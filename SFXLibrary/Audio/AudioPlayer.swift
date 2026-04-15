@@ -263,7 +263,7 @@ final class AudioPlayer: ObservableObject {
 
     private func startPositionTimer() {
         timer?.cancel()
-        timer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common)
+        timer = Timer.publish(every: 1.0 / 24.0, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in self?.updatePosition() }
     }
@@ -280,7 +280,12 @@ final class AudioPlayer: ObservableObject {
         let rateRatio = file.fileFormat.sampleRate / playerTime.sampleRate
         let scaledSampleTime = AVAudioFramePosition(Double(playerTime.sampleTime) * rateRatio)
 
-        let frame = seekFrame + scaledSampleTime
-        playPosition = min(max(Double(frame) / Double(file.length), 0), 1)
+        let frame    = seekFrame + scaledSampleTime
+        let newPos   = min(max(Double(frame) / Double(file.length), 0), 1)
+        // Avoid publishing when the change is too small to move a pixel on screen,
+        // which would otherwise spam objectWillChange 30× per second for nothing.
+        if abs(newPos - playPosition) > 0.0002 {
+            playPosition = newPos
+        }
     }
 }
