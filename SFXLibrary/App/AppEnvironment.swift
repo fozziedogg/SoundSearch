@@ -60,6 +60,10 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(playOnWaveformClick, forKey: "playOnWaveformClick") }
     }
 
+    var metadataEditingEnabled: Bool = UserDefaults.standard.bool(forKey: "metadataEditingEnabled") {
+        didSet { UserDefaults.standard.set(metadataEditingEnabled, forKey: "metadataEditingEnabled") }
+    }
+
     var dragExportMode: DragExportMode = DragExportMode(rawValue: UserDefaults.standard.integer(forKey: "dragExportMode")) ?? .selectionOnly {
         didSet { UserDefaults.standard.set(dragExportMode.rawValue, forKey: "dragExportMode") }
     }

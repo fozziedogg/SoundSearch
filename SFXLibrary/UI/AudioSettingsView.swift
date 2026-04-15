@@ -108,6 +108,16 @@ struct AudioSettingsView: View {
             }
 
             Section {
+                Toggle("Enable metadata editing", isOn: $bEnv.metadataEditingEnabled)
+            } header: {
+                Text("File Info")
+            } footer: {
+                Text("When off, the File Info pane shows metadata as read-only text. Enable to edit BWF, iXML, UCS, and notes fields.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Section {
                 Toggle("Auto-add to active project", isOn: $bEnv.autoAddToProject)
             } header: {
                 Text("Projects")

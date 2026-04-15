@@ -6,7 +6,7 @@ struct MainWindowView: View {
     @State private var selectedFile: AudioFile?
     @State private var showFileInfo: Bool = true
     @State private var detailHeight: CGFloat = 300
-    @State private var fileInfoHeight: CGFloat = 180
+    @State private var fileInfoHeight: CGFloat = 120
 
     private let minDetail: CGFloat  = 180
     private let minBrowser: CGFloat = 140

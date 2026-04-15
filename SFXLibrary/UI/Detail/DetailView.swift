@@ -10,35 +10,44 @@ struct PreviewView: View {
     @State private var waveformHeight: CGFloat = 80
     @State private var fileNotFound: Bool = false
 
+    // Fixed chrome below the waveform: resize handle (8) + drag bar (30) + controls (~62) + header (22)
+    private let waveformChrome: CGFloat = 122
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PanelHeader(title: "Preview")
+        GeometryReader { geo in
+            // Cap the displayed waveform height so it never pushes content above the pane top.
+            let clampedWH = min(waveformHeight, max(40, geo.size.height - waveformChrome))
+            VStack(alignment: .leading, spacing: 0) {
+                PanelHeader(title: "Preview")
 
-            WaveformView(url: URL(fileURLWithPath: file.fileURL),
-                         mtime: file.mtime,
-                         playOnClick: env.playOnWaveformClick,
-                         waveColor: env.waveformColor)
-                .environmentObject(env.audioPlayer)
-                .frame(height: waveformHeight)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .id(file.id)
+                WaveformView(url: URL(fileURLWithPath: file.fileURL),
+                             mtime: file.mtime,
+                             playOnClick: env.playOnWaveformClick,
+                             waveColor: env.waveformColor)
+                    .environmentObject(env.audioPlayer)
+                    .frame(height: clampedWH)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .id(file.id)
 
-            WaveformResizeHandle(height: $waveformHeight)
-                .padding(.horizontal, 16)
+                WaveformResizeHandle(height: $waveformHeight)
+                    .padding(.horizontal, 16)
 
-            WaveformDragBar(file: file)
-                .environmentObject(env.audioPlayer)
-                .frame(height: 26)
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
+                WaveformDragBar(file: file)
+                    .environmentObject(env.audioPlayer)
+                    .frame(height: 26)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
 
-            PlayerControlsView()
-                .environmentObject(env.audioPlayer)
-                .environment(env)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .padding(.bottom, 4)
+                PlayerControlsView()
+                    .environmentObject(env.audioPlayer)
+                    .environment(env)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .padding(.bottom, 4)
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+            .clipped()
         }
         .onAppear {
             if FileManager.default.fileExists(atPath: file.fileURL) {
@@ -145,22 +154,17 @@ struct FileInfoView: View {
                 Divider()
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 0) {
-                        MetadataFormView(file: file)
-                            .padding(16)
-
-                        Divider()
-
                         TechnicalInfoView(file: file)
-                            .padding(16)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
 
                         Divider()
 
-                        ProToolsSpotView(file: file)
-                            .environmentObject(env.audioPlayer)
-                            .padding(16)
+                        MetadataFormView(file: file)
+                            .padding(12)
                     }
                 }
-                .scrollIndicators(.visible)
+                .scrollIndicators(.never)
             }
         }
     }
@@ -238,27 +242,23 @@ private struct TechnicalInfoView: View {
     let file: AudioFile
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Technical")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
-                .textCase(.uppercase)
-                .tracking(1)
-                .padding(.bottom, 4)
-
-            HStack(spacing: 16) {
-                if let sr = file.sampleRate { chip("\(sr / 1000) kHz") }
-                if let bd = file.bitDepth   { chip("\(bd)-bit") }
-                if let ch = file.channels   { chip(ch == 1 ? "Mono" : ch == 2 ? "Stereo" : "\(ch)ch") }
-                if let lu = file.lufs       { chip(String(format: "%.1f LUFS", lu)) }
-                if let d  = file.duration   { chip(String(format: "%.2fs", d)) }
-            }
+        HStack(spacing: 6) {
+            if let sr = file.sampleRate { chip("\(sr / 1000) kHz") }
+            if let bd = file.bitDepth   { chip("\(bd)-bit") }
+            if let ch = file.channels   { chip(ch == 1 ? "Mono" : ch == 2 ? "Stereo" : "\(ch)ch") }
+            if let d  = file.duration   { chip(String(format: "%.2fs", d)) }
+            if let lu = file.lufs       { chip(String(format: "%.1f LUFS", lu)) }
+            Spacer()
         }
     }
 
     private func chip(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, design: .monospaced))
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundColor(.secondary)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Color.white.opacity(0.07))
+            .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 }
