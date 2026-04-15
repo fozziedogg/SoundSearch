@@ -10,8 +10,8 @@ struct PreviewView: View {
     @State private var waveformHeight: CGFloat = 80
     @State private var fileNotFound: Bool = false
 
-    // Fixed chrome below the waveform: resize handle (8) + drag bar (30) + controls (~62) + header (22)
-    private let waveformChrome: CGFloat = 122
+    // Fixed chrome below the waveform: resize handle (8) + drag bar (30) + spot bar (30) + controls (~62) + header (22)
+    private let waveformChrome: CGFloat = 152
 
     var body: some View {
         GeometryReader { geo in
@@ -34,6 +34,12 @@ struct PreviewView: View {
                     .padding(.horizontal, 16)
 
                 WaveformDragBar(file: file)
+                    .environmentObject(env.audioPlayer)
+                    .frame(height: 26)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+
+                ProToolsSpotBar(file: file)
                     .environmentObject(env.audioPlayer)
                     .frame(height: 26)
                     .padding(.horizontal, 16)

@@ -145,6 +145,14 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(autoAddToProject, forKey: "autoAddToProject") }
     }
 
+    /// Seconds of extra audio included before and after content when spotting via PTSL (PT 2025.06+).
+    var spotHandles: Double = {
+        let v = UserDefaults.standard.double(forKey: "spotHandles")
+        return v > 0 ? v : 0.5
+    }() {
+        didSet { UserDefaults.standard.set(spotHandles, forKey: "spotHandles") }
+    }
+
     @ObservationIgnored private var sessionRestored = false
     @ObservationIgnored private var db: DatabasePool
     @ObservationIgnored private var projectsDB: DatabasePool

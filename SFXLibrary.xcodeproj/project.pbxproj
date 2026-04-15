@@ -28,7 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		A438E6582F8714A200DBE776 /* SFXLibrary.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SFXLibrary.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A438E6582F8714A200DBE776 /* SFXLibrary.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = SFXLibrary.app; path = SoundSearch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A438E6672F8714A400DBE776 /* SFXLibraryTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SFXLibraryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A438E6712F8714A400DBE776 /* SFXLibraryUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SFXLibraryUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */

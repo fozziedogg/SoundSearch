@@ -128,6 +128,28 @@ struct AudioSettingsView: View {
             }
 
             Section {
+                HStack(spacing: 4) {
+                    Text("Spot handles")
+                    Spacer()
+                    TextField("", value: $bEnv.spotHandles,
+                              format: .number.precision(.fractionLength(1...2)))
+                        .multilineTextAlignment(.trailing)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 56)
+                    Text("s")
+                        .foregroundColor(.secondary)
+                    Stepper("", value: $bEnv.spotHandles, in: 0...60, step: 0.5)
+                        .labelsHidden()
+                }
+            } header: {
+                Text("Pro Tools Spot")
+            } footer: {
+                Text("Extra audio included before and after the content when using Spot to PT or Spot Peak to PT (Pro Tools 2025.06+).")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Section {
                 Picker("Selection export", selection: $bEnv.dragExportMode) {
                     ForEach(DragExportMode.allCases, id: \.self) { mode in
                         Text(mode.label).tag(mode)
