@@ -62,6 +62,7 @@ struct ProToolsSpotBar: View {
         guard let sampleRate = file.sampleRate, let duration = file.duration else {
             lastResult = .failure("Missing file metadata"); return
         }
+        player.stop()
         begin("Spotting…")
 
         let request = PTSLContentSpotRequest(
@@ -80,6 +81,7 @@ struct ProToolsSpotBar: View {
         guard let sampleRate = file.sampleRate, let duration = file.duration else {
             lastResult = .failure("Missing file metadata"); return
         }
+        player.stop()
         begin("Finding peak…")
 
         let selStart = player.selectionStart ?? 0.0

@@ -108,6 +108,16 @@ struct AudioSettingsView: View {
             }
 
             Section {
+                Toggle("Stop playback when switching apps", isOn: $bEnv.stopOnDefocus)
+            } header: {
+                Text("Playback")
+            } footer: {
+                Text("When enabled, audio stops automatically whenever you switch to another app.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Section {
                 Toggle("Enable metadata editing", isOn: $bEnv.metadataEditingEnabled)
             } header: {
                 Text("File Info")

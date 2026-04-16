@@ -153,6 +153,13 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(spotHandles, forKey: "spotHandles") }
     }
 
+    var stopOnDefocus: Bool = {
+        guard UserDefaults.standard.object(forKey: "stopOnDefocus") != nil else { return true }
+        return UserDefaults.standard.bool(forKey: "stopOnDefocus")
+    }() {
+        didSet { UserDefaults.standard.set(stopOnDefocus, forKey: "stopOnDefocus") }
+    }
+
     @ObservationIgnored private var sessionRestored = false
     @ObservationIgnored private var db: DatabasePool
     @ObservationIgnored private var projectsDB: DatabasePool
@@ -193,6 +200,14 @@ final class AppEnvironment {
         self.projectRepository  = ProjectRepository(db: pDB)
 
         startObservations(db: db, ls: ls, scanner: scanner)
+
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willResignActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.stopOnDefocus else { return }
+            self.audioPlayer.stop()
+        }
     }
 
     // MARK: - Library Management

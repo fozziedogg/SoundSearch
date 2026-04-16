@@ -28,6 +28,7 @@ struct WaveformDragBar: View {
             .overlay(
                 DragHandlerView(
                     computeURL: { computeDeliveryURL() },
+                    onDragStarted: { player.stop() },
                     onCompleted: { _ in
                         env.addToActiveProject(fileURL: file.fileURL)
                     }
@@ -260,26 +261,32 @@ import AppKit
 
 /// Transparent NSView overlay that initiates a drag and reports the completed NSDragOperation.
 struct DragHandlerView: NSViewRepresentable {
-    let computeURL: () -> URL
-    let onCompleted: (NSDragOperation) -> Void
+    let computeURL:    () -> URL
+    let onDragStarted: () -> Void
+    let onCompleted:   (NSDragOperation) -> Void
 
     func makeNSView(context: Context) -> _DragHandlerNSView {
-        _DragHandlerNSView(computeURL: computeURL, onCompleted: onCompleted)
+        _DragHandlerNSView(computeURL: computeURL, onDragStarted: onDragStarted, onCompleted: onCompleted)
     }
 
     func updateNSView(_ nsView: _DragHandlerNSView, context: Context) {
-        nsView.computeURL   = computeURL
-        nsView.onCompleted  = onCompleted
+        nsView.computeURL    = computeURL
+        nsView.onDragStarted = onDragStarted
+        nsView.onCompleted   = onCompleted
     }
 }
 
 final class _DragHandlerNSView: NSView, NSDraggingSource {
-    var computeURL:  () -> URL
-    var onCompleted: (NSDragOperation) -> Void
+    var computeURL:    () -> URL
+    var onDragStarted: () -> Void
+    var onCompleted:   (NSDragOperation) -> Void
 
-    init(computeURL: @escaping () -> URL, onCompleted: @escaping (NSDragOperation) -> Void) {
-        self.computeURL  = computeURL
-        self.onCompleted = onCompleted
+    init(computeURL: @escaping () -> URL,
+         onDragStarted: @escaping () -> Void,
+         onCompleted: @escaping (NSDragOperation) -> Void) {
+        self.computeURL    = computeURL
+        self.onDragStarted = onDragStarted
+        self.onCompleted   = onCompleted
         super.init(frame: .zero)
     }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
@@ -288,6 +295,7 @@ final class _DragHandlerNSView: NSView, NSDraggingSource {
     override var acceptsFirstResponder: Bool { true }
 
     override func mouseDown(with event: NSEvent) {
+        onDragStarted()
         let url  = computeURL()
         let item = NSDraggingItem(pasteboardWriter: url as NSURL)
         let imgBounds = NSRect(origin: .zero, size: NSSize(width: 48, height: 24))

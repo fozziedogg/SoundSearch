@@ -275,9 +275,7 @@ actor PTSLClient {
         }
 
         let ptAnchor = sel.hasSelection ? sel.inSamples : sel.cursorSamples
-        try await importLegacy(path: importURL.path,
-                               spotSamples: ptAnchor,
-                               locationType: "SLType_Start")
+        try await importLegacy(path: importURL.path, spotSamples: ptAnchor)
     }
 
     private func spotPeakLegacy(_ request: PTSLPeakSpotRequest) async throws {
@@ -303,14 +301,15 @@ actor PTSLClient {
                                                endSecs:   request.contentEndSecs)
         }
 
-        try await importLegacy(path: importURL.path,
-                               spotSamples: clipStartSamples,
-                               locationType: "SLType_Start")
+        try await importLegacy(path: importURL.path, spotSamples: clipStartSamples)
     }
 
     // MARK: - Legacy Import command
+    // Note: PT 2024 MediaDestination has no "selected track" option — MD_NewTrack is the
+    // only way to place a clip on the timeline. The clip lands at the correct position;
+    // the user must move it to the target track manually in PT 2024.
 
-    private func importLegacy(path: String, spotSamples: Int64, locationType: String) async throws {
+    private func importLegacy(path: String, spotSamples: Int64) async throws {
         let escaped = path
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -321,8 +320,9 @@ actor PTSLClient {
                 "file_list": ["\(escaped)"],
                 "audio_operations": "CopyAudio",
                 "audio_destination": "MD_NewTrack",
+                "audio_location": "ML_Spot",
                 "location_data": {
-                    "location_type": "\(locationType)",
+                    "location_type": "Start",
                     "location_value": "\(spotSamples)",
                     "location_options": "Samples"
                 }
