@@ -117,9 +117,9 @@ struct WaveformView: View {
                     }
                 }
 
-                // ── Played portion ───────────────────────────────────────────
+                // ── Played portion (only shown during active playback) ────────
                 let vPlay = toViewFrac(player.playPosition)
-                if vPlay > 0 {
+                if vPlay > 0 && player.isPlaying {
                     Rectangle()
                         .fill(waveColor.opacity(0.15))
                         .frame(width: geo.size.width * CGFloat(min(1, vPlay)))

@@ -26,9 +26,7 @@ struct ProToolsSpotBar: View {
                         .foregroundColor(.secondary)
                 }
             } else {
-                Button("Spot to PT")    { Task { await doSpotContent() } }
-                    .buttonStyle(PTSpotButtonStyle())
-                Button("Spot Peak to PT") { Task { await doSpotPeak() } }
+                Button("Spot to PT") { Task { await doSpotContent() } }
                     .buttonStyle(PTSpotButtonStyle())
             }
         }
@@ -74,32 +72,6 @@ struct ProToolsSpotBar: View {
         )
         await run {
             try await env.ptslClient.spotContent(request)
-        }
-    }
-
-    private func doSpotPeak() async {
-        guard let sampleRate = file.sampleRate, let duration = file.duration else {
-            lastResult = .failure("Missing file metadata"); return
-        }
-        player.stop()
-        begin("Finding peak…")
-
-        let selStart = player.selectionStart ?? 0.0
-        let selEnd   = player.selectionEnd   ?? 1.0
-        let url      = URL(fileURLWithPath: file.fileURL)
-
-        await run {
-            let peak = try await PeakFinder.findPeak(in: url, start: selStart, end: selEnd)
-            workLabel = "Spotting…"
-            let request = PTSLPeakSpotRequest(
-                fileURL:          url,
-                peakSample:       peak.sampleIndex,
-                contentStartSecs: selStart * duration,
-                contentEndSecs:   selEnd   * duration,
-                handles:          env.spotHandles,
-                fileSampleRate:   sampleRate
-            )
-            try await env.ptslClient.spotPeak(request)
         }
     }
 

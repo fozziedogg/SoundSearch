@@ -154,7 +154,7 @@ struct AudioSettingsView: View {
             } header: {
                 Text("Pro Tools Spot")
             } footer: {
-                Text("Extra audio included before and after the content when using Spot to PT or Spot Peak to PT (Pro Tools 2025.06+).")
+                Text("Extra audio included before and after the content when using Spot to PT (Pro Tools 2025.06+).")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }

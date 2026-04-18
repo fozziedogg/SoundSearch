@@ -59,21 +59,6 @@ struct PTSLContentSpotRequest {
     let fileSampleRate: Int
 }
 
-/// Spot so the loudest peak aligns with the PT cursor / in-point.
-struct PTSLPeakSpotRequest {
-    let fileURL: URL
-    /// Absolute sample index (from file start) of the peak to align.
-    let peakSample: Int64
-    /// Seconds from file start to the beginning of the search range.
-    let contentStartSecs: Double
-    /// Seconds from file start to the end of the search range.
-    let contentEndSecs: Double
-    /// Extra audio included before and after the content (PT 2025.06+ only).
-    let handles: Double
-    /// Native sample rate of the audio file.
-    let fileSampleRate: Int
-}
-
 // MARK: - Client
 
 /// Handles the PTSL gRPC connection to Pro Tools.
@@ -81,11 +66,8 @@ struct PTSLPeakSpotRequest {
 /// Automatically selects the appropriate spot workflow based on the connected PT version:
 ///   - **PT 2025.06+**: ImportAudioToClipList → CreateAudioClips → SpotClipsByID
 ///     (sub-clip with handles; content trimmed to PT selection)
-///   - **PT 2023.06–2025.05**: Import (ID 2) with SpotLocationData
-///     (no handles; whole file or trimmed export)
-///
-/// **Not yet wired to gRPC.** Every call throws `PTSLError.notImplemented` until
-/// grpc-swift is added. See the MARK: - gRPC Transport section below.
+///   - **PT 2023.06–2025.05**: Import (ID 2) with ML_Spot / location_data
+///     (no handles; whole file or trimmed export; lands on a new track — SDK limitation)
 actor PTSLClient {
 
     static let shared = PTSLClient()
@@ -172,15 +154,6 @@ actor PTSLClient {
         }
     }
 
-    func spotPeak(_ request: PTSLPeakSpotRequest) async throws {
-        try await registerConnection()
-        if isPTSL2025_06orLater {
-            try await spotPeakModern(request)
-        } else {
-            try await spotPeakLegacy(request)
-        }
-    }
-
     // MARK: - Modern spot (PT 2025.06+)
 
     private func spotContentModern(_ request: PTSLContentSpotRequest) async throws {
@@ -201,7 +174,7 @@ actor PTSLClient {
         let srcEnd             = rawEnd + handleSamples
         let actualHandleBefore = rawStart - srcStart
 
-        let ptAnchor          = sel.hasSelection ? sel.inSamples : sel.cursorSamples
+        let ptAnchor          = sel.inSamples   // in_time = edit cursor or selection in-point
         let handleBeforeSess  = Int64((Double(actualHandleBefore) * sessSR / sr).rounded())
         let timelineStart     = ptAnchor - handleBeforeSess
         let clipDurSess       = Int64((Double(srcEnd - srcStart) * sessSR / sr).rounded())
@@ -217,78 +190,18 @@ actor PTSLClient {
         try await spotClipByID(clipId: clipId, anchorSessionSamples: ptAnchor)
     }
 
-    private func spotPeakModern(_ request: PTSLPeakSpotRequest) async throws {
-        let sel    = try await getTimelineSelection()
-        let sr     = Double(request.fileSampleRate)
-        let sessSR = sel.sessionSampleRate
-
-        let handleSamples = Int64((request.handles * sr).rounded())
-        let contentStart  = Int64((request.contentStartSecs * sr).rounded())
-        let contentEnd    = Int64((request.contentEndSecs   * sr).rounded())
-        let srcStart      = max(0, contentStart - handleSamples)
-        let srcEnd        = contentEnd + handleSamples
-
-        let ptAnchor          = sel.hasSelection ? sel.inSamples : sel.cursorSamples
-        let peakOffsetInClip  = request.peakSample - srcStart
-        let peakOffsetSess    = Int64((Double(peakOffsetInClip) * sessSR / sr).rounded())
-        let timelineStart     = ptAnchor - peakOffsetSess
-        let clipDurSess       = Int64((Double(srcEnd - srcStart) * sessSR / sr).rounded())
-        let timelineEnd       = timelineStart + clipDurSess
-
-        let fileId = try await importAudioToClipList(path: request.fileURL.path)
-        let clipId = try await createAudioClip(fileId:        fileId,
-                                               srcStart:      srcStart,
-                                               srcEnd:        srcEnd,
-                                               srcSyncPoint:  request.peakSample,
-                                               timelineStart: timelineStart,
-                                               timelineEnd:   timelineEnd)
-        try await spotClipByID(clipId: clipId, anchorSessionSamples: ptAnchor)
-    }
-
     // MARK: - Legacy spot (PT 2023.06–2025.05)
 
     private func spotContentLegacy(_ request: PTSLContentSpotRequest) async throws {
-        let sel    = try await getTimelineSelection()
-        let sr     = Double(request.fileSampleRate)
-        let sessSR = sel.sessionSampleRate
+        let sel = try await getTimelineSelection()
+        let sr  = Double(request.fileSampleRate)
 
-        let contentStart = request.contentStartSecs
-        var contentEnd   = request.contentEndSecs
+        // in_time is the edit cursor / selection in-point in all PT states.
+        // play_start_marker_time (cursorSamples) is the transport marker and is
+        // often 0 even when the edit cursor is elsewhere — don't use it.
+        let ptAnchor = sel.inSamples
 
-        // Trim content to fit PT selection when one is active
-        if sel.hasSelection {
-            let ptDurSecs = Double(sel.selectionDurationSamples) / sessSR
-            contentEnd = min(contentEnd, contentStart + ptDurSecs)
-        }
-
-        // Determine which file to import: export a segment if needed, else use the original
-        let fileDuration = (try? AVAudioFile(forReading: request.fileURL))
-            .map { Double($0.length) / sr } ?? 0
-        let isWholeFile = contentStart <= 0 && contentEnd >= fileDuration
-        let importURL: URL
-        if isWholeFile {
-            importURL = request.fileURL
-        } else {
-            importURL = try Self.exportSegment(from: request.fileURL,
-                                               startSecs: contentStart,
-                                               endSecs:   contentEnd)
-        }
-
-        let ptAnchor = sel.hasSelection ? sel.inSamples : sel.cursorSamples
-        try await importLegacy(path: importURL.path, spotSamples: ptAnchor)
-    }
-
-    private func spotPeakLegacy(_ request: PTSLPeakSpotRequest) async throws {
-        let sel    = try await getTimelineSelection()
-        let sr     = Double(request.fileSampleRate)
-        let sessSR = sel.sessionSampleRate
-
-        // Calculate where the clip start must go so the peak aligns to PT anchor
-        let ptAnchor         = sel.hasSelection ? sel.inSamples : sel.cursorSamples
-        let peakOffsetSess   = Int64((Double(request.peakSample) * sessSR / sr).rounded())
-        let clipStartSamples = ptAnchor - peakOffsetSess
-
-        // Import the whole content range (no trim needed — peak landing is controlled by position)
+        // Export a segment only if the app has a waveform selection; otherwise use the file as-is.
         let fileDuration = (try? AVAudioFile(forReading: request.fileURL))
             .map { Double($0.length) / sr } ?? 0
         let isWholeFile = request.contentStartSecs <= 0 && request.contentEndSecs >= fileDuration
@@ -301,7 +214,7 @@ actor PTSLClient {
                                                endSecs:   request.contentEndSecs)
         }
 
-        try await importLegacy(path: importURL.path, spotSamples: clipStartSamples)
+        try await importLegacy(path: importURL.path, spotSamples: ptAnchor)
     }
 
     // MARK: - Legacy Import command
@@ -315,10 +228,10 @@ actor PTSLClient {
             .replacingOccurrences(of: "\"", with: "\\\"")
         let body = """
         {
-            "import_type": "ImportType_Audio",
+            "import_type": "Audio",
             "audio_data": {
                 "file_list": ["\(escaped)"],
-                "audio_operations": "CopyAudio",
+                "audio_operations": "ConvertAudio",
                 "audio_destination": "MD_NewTrack",
                 "audio_location": "ML_Spot",
                 "location_data": {
@@ -329,7 +242,7 @@ actor PTSLClient {
             }
         }
         """
-        _ = try await sendRequest(commandId: 2, body: body)
+        _ = try await sendRequest(commandId: 2, body: body, streaming: true)
     }
 
     // MARK: - Modern PTSL steps
@@ -468,10 +381,10 @@ actor PTSLClient {
         return client
     }
 
-    private func sendRequest(commandId: Int, body: String) async throws -> String {
+    private func sendRequest(commandId: Int, body: String, streaming: Bool = false) async throws -> String {
         var header          = Ptsl_RequestHeader()
         header.command      = Ptsl_CommandId(rawValue: commandId) ?? .cidNone
-        header.version      = Int32(ptslVersionMajor > 0 ? ptslVersionMajor : 2024)
+        header.version      = Int32(ptslVersionMajor > 0 ? ptslVersionMajor : 5)
         header.versionMinor = Int32(ptslVersionMinor)
         header.sessionID    = sessionId ?? ""
 
@@ -479,7 +392,22 @@ actor PTSLClient {
         req.header          = header
         req.requestBodyJson = body
 
-        let response = try await grpcClient().sendGrpcRequest(req)
+        let response: Ptsl_Response
+        if streaming {
+            response = try await grpcClient().sendGrpcStreamingRequest(req)
+        } else {
+            response = try await grpcClient().sendGrpcRequest(req)
+        }
+
+        // Async commands (Import) return Queued with a taskId; poll until the task finishes.
+        if response.header.status == .tstatusQueued {
+            let taskId = response.header.taskID
+            guard !taskId.isEmpty else {
+                throw PTSLError.commandFailed("Command \(commandId) returned Queued without taskId")
+            }
+            try await pollUntilComplete(taskId: taskId)
+            return response.responseBodyJson
+        }
 
         guard response.header.status == .tstatusCompleted else {
             let msg = response.responseErrorJson.isEmpty
@@ -488,5 +416,41 @@ actor PTSLClient {
             throw PTSLError.commandFailed(msg)
         }
         return response.responseBodyJson
+    }
+
+    // Polls GetTaskStatus until the import task finishes (mirrors C++ PingTaskStatus).
+    private func pollUntilComplete(taskId: String) async throws {
+        let timeout   = Date().addingTimeInterval(60)
+        let pollDelay: UInt64 = 500_000_000   // 500 ms
+
+        // Wait 1 s before first poll to give PT time to start the task.
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+
+        while Date() < timeout {
+            var hdr          = Ptsl_RequestHeader()
+            hdr.command      = .cidGetTaskStatus
+            hdr.version      = Int32(ptslVersionMajor > 0 ? ptslVersionMajor : 5)
+            hdr.versionMinor = Int32(ptslVersionMinor)
+            hdr.sessionID    = sessionId ?? ""
+
+            var req             = Ptsl_Request()
+            req.header          = hdr
+            req.requestBodyJson = #"{"task_id":"\#(taskId)"}"#
+
+            let resp = try await grpcClient().sendGrpcRequest(req)
+
+            switch resp.header.status {
+            case .tstatusCompleted:
+                return
+            case .tstatusFailed:
+                let msg = resp.responseErrorJson.isEmpty
+                    ? "Async task failed (taskId: \(taskId))"
+                    : resp.responseErrorJson
+                throw PTSLError.commandFailed(msg)
+            default:
+                try await Task.sleep(nanoseconds: pollDelay)
+            }
+        }
+        throw PTSLError.commandFailed("Timed out waiting for async task (taskId: \(taskId))")
     }
 }

@@ -16,6 +16,7 @@ enum Ptsl_CommandId: SwiftProtobuf.Enum {
     case cidGetPtslVersion
     case cidRegisterConnection
     case cidGetTimelineSelection
+    case cidGetTaskStatus
     case cidImportAudioToClipList
     case cidSpotClipsByID
     case cidCreateAudioClips
@@ -27,6 +28,7 @@ enum Ptsl_CommandId: SwiftProtobuf.Enum {
         switch rawValue {
         case 0:   self = .cidNone
         case 2:   self = .cidImport
+        case 12:  self = .cidGetTaskStatus
         case 35:  self = .cidGetSessionSampleRate
         case 55:  self = .cidGetPtslVersion
         case 70:  self = .cidRegisterConnection
@@ -42,6 +44,7 @@ enum Ptsl_CommandId: SwiftProtobuf.Enum {
         switch self {
         case .cidNone:                   return 0
         case .cidImport:                 return 2
+        case .cidGetTaskStatus:          return 12
         case .cidGetSessionSampleRate:   return 35
         case .cidGetPtslVersion:         return 55
         case .cidRegisterConnection:     return 70
