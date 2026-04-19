@@ -56,7 +56,7 @@ struct PreviewView: View {
         }
         .onAppear {
             if FileManager.default.fileExists(atPath: file.fileURL) {
-                env.audioPlayer.load(url: URL(fileURLWithPath: file.fileURL))
+                env.audioPlayer.load(url: URL(fileURLWithPath: file.fileURL), resetVolume: env.resetVolumeOnLoad)
                 if env.autoPlayOnSelect { env.audioPlayer.play() }
             } else {
                 flagMissing()

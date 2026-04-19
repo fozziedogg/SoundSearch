@@ -51,6 +51,21 @@ final class AudioPlayer: ObservableObject {
         }
 
         startEngine()
+
+        // AVAudioEngine silently breaks if macOS reconfigures the audio graph
+        // (device enumeration at launch, system audio server restart, etc.).
+        // Reconnecting and restarting here recovers automatically.
+        NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            if self.isPlaying { self.stop() }
+            self.reconnectGraph()
+            self.startEngine()
+            self.engine.mainMixerNode.outputVolume = self.volume
+        }
     }
 
     // MARK: - Output device
@@ -83,13 +98,13 @@ final class AudioPlayer: ObservableObject {
 
     // MARK: - Load
 
-    func load(url: URL) {
+    func load(url: URL, resetVolume: Bool = false) {
         guard url != currentURL else { return }
         stop()
         currentURL    = url
         selectionStart = nil
         selectionEnd   = nil
-        volume         = 1.0
+        if resetVolume { volume = 1.0 }
         do {
             audioFile    = try AVAudioFile(forReading: url)
             duration     = Double(audioFile!.length) / audioFile!.processingFormat.sampleRate

@@ -158,6 +158,13 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(spotHandles, forKey: "spotHandles") }
     }
 
+    /// When true, the volume slider resets to 100% when loading a new file.
+    var resetVolumeOnLoad: Bool = {
+        return UserDefaults.standard.bool(forKey: "resetVolumeOnLoad")   // default false
+    }() {
+        didSet { UserDefaults.standard.set(resetVolumeOnLoad, forKey: "resetVolumeOnLoad") }
+    }
+
     var stopOnDefocus: Bool = {
         guard UserDefaults.standard.object(forKey: "stopOnDefocus") != nil else { return true }
         return UserDefaults.standard.bool(forKey: "stopOnDefocus")

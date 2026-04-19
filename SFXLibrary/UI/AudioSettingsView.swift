@@ -109,6 +109,7 @@ struct AudioSettingsView: View {
 
             Section {
                 Toggle("Stop playback when switching apps", isOn: $bEnv.stopOnDefocus)
+                Toggle("Reset gain when opening new file", isOn: $bEnv.resetVolumeOnLoad)
                 Toggle("Commit volume on export", isOn: $bEnv.commitVolumeOnExport)
             } header: {
                 Text("Playback")
