@@ -53,6 +53,15 @@ final class AudioPlayer: ObservableObject {
     // breaking the feedback loop where our own restart triggers another notification.
     private var suppressConfigChangeUntil: Date = .distantPast
 
+    // Debug helpers
+    private static let debugAudio = true
+    private static var t0: Date = Date()
+    private func dbg(_ msg: String) {
+        guard Self.debugAudio else { return }
+        let ms = Int(Date().timeIntervalSince(Self.t0) * 1000)
+        print("[Audio +\(ms)ms] \(msg)")
+    }
+
     init() {
         engine.attach(playerNode)
         engine.connect(playerNode, to: engine.mainMixerNode, format: nil)
@@ -78,11 +87,13 @@ final class AudioPlayer: ObservableObject {
         ) { [weak self] _ in
             guard let self else { return }
             // Ignore notifications we triggered ourselves when restarting the engine.
-            guard Date() > self.suppressConfigChangeUntil else { return }
+            guard Date() > self.suppressConfigChangeUntil else {
+                self.dbg("AVAudioEngineConfigurationChange — SUPPRESSED (our own restart)")
+                return
+            }
 
-            // Only update the resume target when we're actually playing — a second
-            // notification would see isPlaying==false (we already stopped) and lose
-            // the intent to resume. configChangeShouldResume persists until consumed.
+            self.dbg("AVAudioEngineConfigurationChange — LIVE (isPlaying=\(self.isPlaying), engineRunning=\(self.engine.isRunning))")
+
             if self.isPlaying {
                 self.configChangeShouldResume   = true
                 self.configChangeResumePosition = self.playPosition
@@ -91,26 +102,26 @@ final class AudioPlayer: ObservableObject {
                 self.isPlaying = false
                 self.timer?.cancel()
                 self.seekFrame = 0
+                self.dbg("  → stopped playback, will resume at \(String(format: "%.3f", self.configChangeResumePosition))")
             }
-            // Debounce: cancel any pending restart so rapid-fire notifications
-            // (Bluetooth glitching, PT Aux I/O reconfiguring) only trigger one restart.
             self.configChangeWork?.cancel()
             let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
                 let shouldResume = self.configChangeShouldResume
                 let resumePos    = self.configChangeResumePosition
                 self.configChangeShouldResume = false
+                self.dbg("  → restarting engine (shouldResume=\(shouldResume))")
                 self.reconnectGraph()
                 self.startEngine()
                 self.engine.mainMixerNode.outputVolume = self.volume
+                self.dbg("  → engine restarted, running=\(self.engine.isRunning), sr=\(self.outputSampleRate)")
                 if shouldResume {
                     self.playPosition = resumePos
                     self.play()
+                    self.dbg("  → playback resumed")
                 }
             }
             self.configChangeWork = work
-            // Short delay lets the triggering app (e.g. Pro Tools) finish its own
-            // reconfiguration before we try to reclaim the device.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
         }
     }
@@ -118,9 +129,11 @@ final class AudioPlayer: ObservableObject {
     /// Restarts the engine if it has stopped (e.g. after Pro Tools changes the session sample rate).
     func recoverEngineIfNeeded() {
         guard !engine.isRunning else { return }
+        dbg("recoverEngineIfNeeded — engine was stopped, restarting")
         reconnectGraph()
         startEngine()
         engine.mainMixerNode.outputVolume = volume
+        dbg("recoverEngineIfNeeded — done, running=\(engine.isRunning), sr=\(outputSampleRate)")
     }
 
     // MARK: - Output device
@@ -244,10 +257,13 @@ final class AudioPlayer: ObservableObject {
     /// own restart triggers another notification and another restart.
     private func startEngine() {
         suppressConfigChangeUntil = Date().addingTimeInterval(1.0)
+        dbg("startEngine — suppressing config changes for 1s")
         do {
             try engine.start()
             outputSampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
+            dbg("startEngine — OK, sr=\(outputSampleRate)")
         } catch {
+            dbg("startEngine — FAILED: \(error)")
             print("[AudioPlayer] engine start error: \(error)")
             outputSampleRate = 0
         }
@@ -343,8 +359,12 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func updatePosition() {
-        guard engine.isRunning,
-              let file = audioFile,
+        guard isPlaying else { return }
+        guard engine.isRunning else {
+            dbg("updatePosition — engine stopped while isPlaying=true")
+            return
+        }
+        guard let file = audioFile,
               let nodeTime   = playerNode.lastRenderTime,
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime),
               file.length > 0 else { return }
@@ -357,8 +377,12 @@ final class AudioPlayer: ObservableObject {
 
         let frame    = seekFrame + scaledSampleTime
         let newPos   = min(max(Double(frame) / Double(file.length), 0), 1)
-        // Avoid publishing when the change is too small to move a pixel on screen,
-        // which would otherwise spam objectWillChange 30× per second for nothing.
+
+        // Detect a position jump larger than ~0.5s — likely a glitch or engine restart.
+        if abs(newPos - playPosition) > (0.5 / max(duration, 1)) {
+            dbg("POSITION JUMP: \(String(format: "%.3f", playPosition)) → \(String(format: "%.3f", newPos))  (nodeRunning=\(playerNode.isPlaying))")
+        }
+
         if abs(newPos - playPosition) > 0.0002 {
             playPosition = newPos
         }
