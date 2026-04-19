@@ -58,6 +58,17 @@ struct SFXLibraryApp: App {
         .commands {
             CommandGroup(replacing: .newItem) { }
 
+            CommandMenu("Debug") {
+                Button("Copy Audio Log to Clipboard") {
+                    let logURL = FileManager.default.homeDirectoryForCurrentUser
+                        .appendingPathComponent("Desktop/sfxaudio.log")
+                    if let text = try? String(contentsOf: logURL, encoding: .utf8) {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                    }
+                }
+            }
+
             CommandMenu("Library") {
                 // Current database indicator
                 Button(currentDBName.isEmpty ? "No Database" : currentDBName) { }
