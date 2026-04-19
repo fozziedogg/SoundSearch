@@ -49,6 +49,9 @@ final class AudioPlayer: ObservableObject {
     // because the first already stopped the node).
     private var configChangeShouldResume:  Bool   = false
     private var configChangeResumePosition: Double = 0
+    // Suppresses config-change responses briefly after we restart the engine,
+    // breaking the feedback loop where our own restart triggers another notification.
+    private var suppressConfigChangeUntil: Date = .distantPast
 
     init() {
         engine.attach(playerNode)
@@ -74,6 +77,9 @@ final class AudioPlayer: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
+            // Ignore notifications we triggered ourselves when restarting the engine.
+            guard Date() > self.suppressConfigChangeUntil else { return }
+
             // Only update the resume target when we're actually playing — a second
             // notification would see isPlaying==false (we already stopped) and lose
             // the intent to resume. configChangeShouldResume persists until consumed.
@@ -233,7 +239,11 @@ final class AudioPlayer: ObservableObject {
     }
 
     /// Starts the engine and captures the hardware output sample rate.
+    /// Also sets the suppression window so any AVAudioEngineConfigurationChange
+    /// fired by this restart is ignored — prevents the feedback loop where our
+    /// own restart triggers another notification and another restart.
     private func startEngine() {
+        suppressConfigChangeUntil = Date().addingTimeInterval(1.0)
         do {
             try engine.start()
             outputSampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
