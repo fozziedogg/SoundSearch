@@ -23,7 +23,7 @@ struct PreviewView: View {
                 WaveformView(url: URL(fileURLWithPath: file.fileURL),
                              mtime: file.mtime,
                              playOnClick: env.playOnWaveformClick,
-                             waveColor: env.waveformColor)
+                             waveColor: env.grahamRogersMode ? .teal : env.waveformColor)
                     .environmentObject(env.audioPlayer)
                     .frame(height: clampedWH)
                     .padding(.horizontal, 16)

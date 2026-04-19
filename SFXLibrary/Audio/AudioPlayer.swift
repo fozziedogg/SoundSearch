@@ -52,22 +52,38 @@ final class AudioPlayer: ObservableObject {
 
         startEngine()
 
-        // AVAudioEngine silently breaks if macOS reconfigures the audio graph
-        // (device enumeration at launch, Pro Tools changing the session sample rate, etc.).
-        // Delay the restart so the triggering app (PT) has time to finish its own
-        // reconfiguration before we try to reclaim the device.
+        // macOS stops AVAudioEngine whenever it reconfigures the audio graph —
+        // device enumeration at launch, Pro Tools changing the session sample rate, etc.
+        // Save playback state and auto-resume after reconnecting so the user hears
+        // only a brief dropout rather than audio stopping entirely.
         NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine,
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            if self.isPlaying { self.stop() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            let wasPlaying    = self.isPlaying
+            let savedPosition = self.playPosition
+            // Stop cleanly (engine is already halted by macOS, but we need to
+            // reset playerNode state and invalidate the schedule generation).
+            if wasPlaying {
+                self.scheduleGeneration += 1
+                self.playerNode.stop()
+                self.isPlaying = false
+                self.timer?.cancel()
+                self.seekFrame = 0
+            }
+            // Short delay lets the triggering app (e.g. Pro Tools) finish its own
+            // reconfiguration before we try to reclaim the device.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
                 guard let self else { return }
                 self.reconnectGraph()
                 self.startEngine()
                 self.engine.mainMixerNode.outputVolume = self.volume
+                if wasPlaying {
+                    self.playPosition = savedPosition
+                    self.play()
+                }
             }
         }
     }
@@ -296,7 +312,8 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func updatePosition() {
-        guard let file = audioFile,
+        guard engine.isRunning,
+              let file = audioFile,
               let nodeTime   = playerNode.lastRenderTime,
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime),
               file.length > 0 else { return }
