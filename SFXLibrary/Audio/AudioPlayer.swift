@@ -64,30 +64,22 @@ final class AudioPlayer: ObservableObject {
             guard let self else { return }
             let wasPlaying    = self.isPlaying
             let savedPosition = self.playPosition
-            let deviceUID     = self.currentOutputDeviceUID.isEmpty ? "system-default" : self.currentOutputDeviceUID
-            let outFmt        = self.engine.outputNode.outputFormat(forBus: 0)
-            self.dbg("AVAudioEngineConfigurationChange — device=\(deviceUID) "
-                   + "sampleRate=\(outFmt.sampleRate) isPlaying=\(wasPlaying) "
-                   + "engine.isRunning=\(self.engine.isRunning)")
-
             if wasPlaying {
                 self.scheduleGeneration += 1
                 self.playerNode.stop()
                 self.isPlaying = false
                 self.timer?.cancel()
                 self.seekFrame = 0
-                self.dbg("configChange — stopped playback, savedPosition=\(String(format:"%.4f", savedPosition))")
             }
-
+            // Short delay lets the triggering app (e.g. Pro Tools) finish its own
+            // reconfiguration before we try to reclaim the device.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
                 guard let self else { return }
-                self.dbg("configChange — attempting recovery (wasPlaying=\(wasPlaying))")
                 self.reconnectGraph()
                 self.startEngine()
                 self.engine.mainMixerNode.outputVolume = self.volume
                 if wasPlaying {
                     self.playPosition = savedPosition
-                    self.dbg("configChange — resuming playback from \(String(format:"%.4f", savedPosition))")
                     self.play()
                 }
             }
@@ -96,11 +88,7 @@ final class AudioPlayer: ObservableObject {
 
     /// Restarts the engine if it has stopped (e.g. after Pro Tools changes the session sample rate).
     func recoverEngineIfNeeded() {
-        dbg("recoverEngineIfNeeded — engine.isRunning=\(engine.isRunning) isPlaying=\(isPlaying)")
-        guard !engine.isRunning else {
-            dbg("recoverEngineIfNeeded — engine already running, no action")
-            return
-        }
+        guard !engine.isRunning else { return }
         reconnectGraph()
         startEngine()
         engine.mainMixerNode.outputVolume = volume
@@ -111,17 +99,13 @@ final class AudioPlayer: ObservableObject {
     /// Switches audio output to the device identified by `uid`.
     /// Pass an empty string to revert to the system default.
     func setOutputDevice(uid: String) {
-        dbg("setOutputDevice — uid='\(uid.isEmpty ? "system-default" : uid)'")
         let deviceID: AudioDeviceID?
         if uid.isEmpty {
             deviceID = AudioDeviceManager.systemDefaultOutputDeviceID()
         } else {
             deviceID = AudioDeviceManager.deviceID(forUID: uid)
         }
-        guard let deviceID else {
-            dbg("setOutputDevice — deviceID not found for uid '\(uid)'")
-            return
-        }
+        guard let deviceID else { return }
 
         if isPlaying { stop() }
         engine.stop()
@@ -221,34 +205,19 @@ final class AudioPlayer: ObservableObject {
     /// Disconnects and reconnects the processing graph so AVAudioEngine
     /// re-derives node formats from the current hardware rate on next start.
     private func reconnectGraph() {
-        dbg("reconnectGraph — disconnecting playerNode")
         engine.disconnectNodeOutput(playerNode)
         engine.connect(playerNode, to: engine.mainMixerNode, format: nil)
-        let fmt = engine.outputNode.outputFormat(forBus: 0)
-        dbg("reconnectGraph — output format after reconnect: \(fmt.sampleRate) Hz, \(fmt.channelCount)ch")
     }
 
     /// Starts the engine and captures the hardware output sample rate.
     private func startEngine() {
-        let deviceUID = currentOutputDeviceUID.isEmpty ? "system-default" : currentOutputDeviceUID
-        dbg("startEngine — device=\(deviceUID) engine.isRunning=\(engine.isRunning)")
         do {
             try engine.start()
             outputSampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
-            dbg("startEngine — OK, outputSampleRate=\(outputSampleRate)")
         } catch {
-            dbg("startEngine — FAILED: \(error)")
             print("[AudioPlayer] engine start error: \(error)")
             outputSampleRate = 0
         }
-    }
-
-    // MARK: - Debug
-
-    private func dbg(_ msg: String) {
-        // Filter in Console.app or Xcode output with "[AudioDebug]"
-        let t = Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 10000)
-        print(String(format: "[AudioDebug %07.3f] %@", t, msg))
     }
 
     /// Sets the CoreAudio output device on the engine's output unit without
