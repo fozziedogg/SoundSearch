@@ -369,16 +369,30 @@ final class AudioPlayer: ObservableObject {
             .sink { [weak self] _ in self?.updatePosition() }
     }
 
+    private var _nilPlayerTimeCount = 0
+
     private func updatePosition() {
         guard isPlaying else { return }
         guard engine.isRunning else {
             dbg("updatePosition — engine stopped while isPlaying=true")
             return
         }
-        guard let file = audioFile,
-              let nodeTime   = playerNode.lastRenderTime,
-              let playerTime = playerNode.playerTime(forNodeTime: nodeTime),
-              file.length > 0 else { return }
+        guard let file = audioFile, file.length > 0 else { return }
+        guard let nodeTime = playerNode.lastRenderTime else {
+            _nilPlayerTimeCount += 1
+            if _nilPlayerTimeCount == 1 || _nilPlayerTimeCount % 24 == 0 {
+                dbg("updatePosition — lastRenderTime nil (x\(_nilPlayerTimeCount))")
+            }
+            return
+        }
+        guard let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
+            _nilPlayerTimeCount += 1
+            if _nilPlayerTimeCount == 1 || _nilPlayerTimeCount % 24 == 0 {
+                dbg("updatePosition — playerTime nil (x\(_nilPlayerTimeCount)), nodeRunning=\(playerNode.isPlaying)")
+            }
+            return
+        }
+        _nilPlayerTimeCount = 0
 
         // playerTime.sampleTime is in the player node's output format rate (= hardware rate),
         // but seekFrame and file.length are in the file's native sample rate.
