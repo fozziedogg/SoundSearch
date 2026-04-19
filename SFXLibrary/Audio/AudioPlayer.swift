@@ -7,7 +7,13 @@ final class AudioPlayer: ObservableObject {
     @Published var isPlaying:    Bool   = false
     @Published var playPosition: Double = 0   // 0.0 – 1.0
     @Published var duration:     Double = 0
-    @Published var volume: Float = (UserDefaults.standard.object(forKey: "playerVolume") as? Float) ?? 1.0 {
+    @Published var volume: Float = {
+        if let saved = UserDefaults.standard.object(forKey: "playerVolume") as? Float {
+            return saved
+        }
+        UserDefaults.standard.set(Float(1.0), forKey: "playerVolume")
+        return 1.0
+    }() {
         didSet {
             engine.mainMixerNode.outputVolume = volume
             UserDefaults.standard.set(volume, forKey: "playerVolume")
@@ -86,6 +92,7 @@ final class AudioPlayer: ObservableObject {
         }
 
         startEngine()
+        engine.mainMixerNode.outputVolume = volume
 
         // macOS stops AVAudioEngine whenever it reconfigures the audio graph —
         // device enumeration at launch, Pro Tools changing the session sample rate, etc.
@@ -405,7 +412,7 @@ final class AudioPlayer: ObservableObject {
 
         // Detect a position jump larger than ~0.5s — likely a glitch or engine restart.
         if abs(newPos - playPosition) > (0.5 / max(duration, 1)) {
-            dbg("POSITION JUMP: \(String(format: "%.3f", playPosition)) → \(String(format: "%.3f", newPos))  (nodeRunning=\(playerNode.isPlaying))")
+            dbg("POSITION JUMP: \(String(format: "%.3f", playPosition)) → \(String(format: "%.3f", newPos))  (nodeRunning=\(playerNode.isPlaying), sampleTime=\(playerTime.sampleTime), seekFrame=\(seekFrame), rateRatio=\(String(format: "%.4f", file.fileFormat.sampleRate / playerTime.sampleRate)))")
         }
 
         if abs(newPos - playPosition) > 0.0002 {
