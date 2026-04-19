@@ -147,11 +147,12 @@ actor PTSLClient {
 
     func spotContent(_ request: PTSLContentSpotRequest) async throws {
         try await registerConnection()
-        if isPTSL2025_06orLater {
-            try await spotContentModern(request)
-        } else {
+        // TODO: Re-enable once PT 2025.06+ has been tested.
+        // if isPTSL2025_06orLater {
+        //     try await spotContentModern(request)
+        // } else {
             try await spotContentLegacy(request)
-        }
+        // }
     }
 
     // MARK: - Modern spot (PT 2025.06+)
