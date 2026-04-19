@@ -53,13 +53,24 @@ final class AudioPlayer: ObservableObject {
     // breaking the feedback loop where our own restart triggers another notification.
     private var suppressConfigChangeUntil: Date = .distantPast
 
-    // Debug helpers
+    // Debug helpers — writes directly to ~/Desktop/sfxaudio.log, bypassing Xcode's stdout pipe.
     private static let debugAudio = true
     private static var t0: Date = Date()
+    private static let logHandle: FileHandle? = {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Desktop/sfxaudio.log")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        return try? FileHandle(forWritingTo: url)
+    }()
+
     private func dbg(_ msg: String) {
         guard Self.debugAudio else { return }
         let ms = Int(Date().timeIntervalSince(Self.t0) * 1000)
-        print("[Audio +\(ms)ms] \(msg)")
+        let line = "[Audio +\(ms)ms] \(msg)\n"
+        print(line, terminator: "")
+        if let data = line.data(using: .utf8) {
+            Self.logHandle?.write(data)
+        }
     }
 
     init() {
