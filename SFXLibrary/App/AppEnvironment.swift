@@ -4,6 +4,11 @@ import GRDB
 import Observation
 import UniformTypeIdentifiers
 
+enum SpotFeedback {
+    case success
+    case failure(String)
+}
+
 /// Root object that wires all services together and is injected into the SwiftUI environment.
 @Observable
 final class AppEnvironment {
@@ -158,6 +163,17 @@ final class AppEnvironment {
         return UserDefaults.standard.bool(forKey: "stopOnDefocus")
     }() {
         didSet { UserDefaults.standard.set(stopOnDefocus, forKey: "stopOnDefocus") }
+    }
+
+    /// Transient spot result shown in the player controls row. Cleared on new file selection.
+    var spotFeedback: SpotFeedback? = nil
+
+    /// When true, Pro Tools is brought to the foreground after a successful Spot to PT.
+    var focusProToolsOnSpot: Bool = {
+        guard UserDefaults.standard.object(forKey: "focusProToolsOnSpot") != nil else { return true }
+        return UserDefaults.standard.bool(forKey: "focusProToolsOnSpot")
+    }() {
+        didSet { UserDefaults.standard.set(focusProToolsOnSpot, forKey: "focusProToolsOnSpot") }
     }
 
     /// When true, the current preview volume is baked into audio delivered via drag or Spot to PT.

@@ -1,22 +1,16 @@
 import SwiftUI
+import AppKit
 
 struct ProToolsSpotBar: View {
     let file: AudioFile
     @EnvironmentObject var player: AudioPlayer
     @Environment(AppEnvironment.self) var env
 
-    @State private var isWorking  = false
-    @State private var workLabel  = ""
-    @State private var lastResult: SpotResult? = nil
-
-    private enum SpotResult {
-        case success
-        case failure(String)
-    }
+    @State private var isWorking = false
+    @State private var workLabel = ""
 
     var body: some View {
         HStack(spacing: 6) {
-            feedbackView
             if isWorking {
                 HStack(spacing: 4) {
                     ProgressView().controlSize(.mini)
@@ -29,35 +23,14 @@ struct ProToolsSpotBar: View {
                     .buttonStyle(PTSpotButtonStyle())
             }
         }
-        .onChange(of: file.id) { _, _ in lastResult = nil }
-    }
-
-    // MARK: - Feedback
-
-    @ViewBuilder
-    private var feedbackView: some View {
-        switch lastResult {
-        case .none:
-            EmptyView()
-        case .success:
-            Label("Spotted", systemImage: "checkmark.circle.fill")
-                .font(.system(size: 10))
-                .foregroundColor(.green)
-        case .failure(let msg):
-            Label(msg, systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 10))
-                .foregroundColor(.red)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .help(msg)
-        }
+        .onChange(of: file.id) { _, _ in env.spotFeedback = nil }
     }
 
     // MARK: - Actions
 
     private func doSpotContent() async {
         guard let sampleRate = file.sampleRate, let duration = file.duration else {
-            lastResult = .failure("Missing file metadata"); return
+            env.spotFeedback = .failure("Missing file metadata"); return
         }
         player.stop()
         begin("Spotting…")
@@ -84,18 +57,24 @@ struct ProToolsSpotBar: View {
     // MARK: - Helpers
 
     private func begin(_ label: String) {
-        isWorking  = true
-        workLabel  = label
-        lastResult = nil
+        isWorking        = true
+        workLabel        = label
+        env.spotFeedback = nil
     }
 
     private func run(_ block: @escaping () async throws -> Void) async {
         do {
             try await block()
-            lastResult = .success
+            env.spotFeedback = .success
             env.addToActiveProject(fileURL: file.fileURL)
+            if env.focusProToolsOnSpot {
+                NSWorkspace.shared.runningApplications
+                    .first { $0.bundleIdentifier == "com.avid.ProTools"
+                          || $0.localizedName    == "Pro Tools" }?
+                    .activate(options: .activateIgnoringOtherApps)
+            }
         } catch {
-            lastResult = .failure(error.localizedDescription)
+            env.spotFeedback = .failure(error.localizedDescription)
         }
         isWorking = false
     }

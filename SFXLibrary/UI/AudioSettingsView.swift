@@ -139,6 +139,7 @@ struct AudioSettingsView: View {
             }
 
             Section {
+                Toggle("Focus Pro Tools after spot", isOn: $bEnv.focusProToolsOnSpot)
                 HStack(spacing: 4) {
                     Text("Spot handles")
                     Spacer()

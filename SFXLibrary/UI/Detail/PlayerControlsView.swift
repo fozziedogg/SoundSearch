@@ -49,29 +49,48 @@ struct PlayerControlsView: View {
                     .frame(width: 36, alignment: .trailing)
             }
 
-            // Playback options row
-            HStack(spacing: 2) {
-                Spacer()
-                optionToggle(
-                    icon: "bolt", activeIcon: "bolt.fill",
-                    label: "Autoplay",
-                    help: "Play automatically when a file is selected",
-                    isOn: env.autoPlayOnSelect
-                ) { env.autoPlayOnSelect.toggle() }
+            // Playback options row — spot feedback floats centred, toggles stay trailing
+            ZStack {
+                if let feedback = env.spotFeedback {
+                    Group {
+                        switch feedback {
+                        case .success:
+                            Label("Spotted", systemImage: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                        case .failure(let msg):
+                            Label(msg, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .help(msg)
+                        }
+                    }
+                    .font(.system(size: 10))
+                }
 
-                optionToggle(
-                    icon: "cursorarrow.rays",
-                    label: "Click to Play",
-                    help: "Play when clicking on the waveform",
-                    isOn: env.playOnWaveformClick
-                ) { env.playOnWaveformClick.toggle() }
+                HStack(spacing: 2) {
+                    Spacer()
+                    optionToggle(
+                        icon: "bolt", activeIcon: "bolt.fill",
+                        label: "Autoplay",
+                        help: "Play automatically when a file is selected",
+                        isOn: env.autoPlayOnSelect
+                    ) { env.autoPlayOnSelect.toggle() }
 
-                optionToggle(
-                    icon: "repeat",
-                    label: "Loop",
-                    help: "Loop the selection during playback",
-                    isOn: player.loopEnabled
-                ) { player.loopEnabled.toggle() }
+                    optionToggle(
+                        icon: "cursorarrow.rays",
+                        label: "Click to Play",
+                        help: "Play when clicking on the waveform",
+                        isOn: env.playOnWaveformClick
+                    ) { env.playOnWaveformClick.toggle() }
+
+                    optionToggle(
+                        icon: "repeat",
+                        label: "Loop",
+                        help: "Loop the selection during playback",
+                        isOn: player.loopEnabled
+                    ) { player.loopEnabled.toggle() }
+                }
             }
         }
     }
