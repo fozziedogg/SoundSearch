@@ -1,7 +1,6 @@
 import Foundation
 import AVFoundation
 import CoreAudio
-import Combine
 
 final class AudioPlayer: ObservableObject {
     @Published var isPlaying:    Bool   = false
@@ -48,8 +47,13 @@ final class AudioPlayer: ObservableObject {
     private let engine     = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private var audioFile:  AVAudioFile?
-    private var timer:      AnyCancellable?
+    private var timer:      DispatchSourceTimer?
     private var currentURL: URL?
+
+    // The sample rate of the playerNode→mainMixerNode connection — set whenever we
+    // reconnect the graph. Used for position math instead of playerTime.sampleRate,
+    // which can transiently report the wrong value during HAL reconfiguration.
+    private var graphSampleRate: Double = 0
 
     // Frame we last scheduled from — added to sampleTime for real position.
     private var seekFrame: AVAudioFramePosition = 0
@@ -295,6 +299,8 @@ final class AudioPlayer: ObservableObject {
             AVAudioFormat(standardFormatWithSampleRate: $0, channels: 2)
         }
         engine.connect(playerNode, to: engine.mainMixerNode, format: format)
+        // graphSampleRate is updated to nil-format value after start in startEngine().
+        if let rate = sampleRate { graphSampleRate = rate }
     }
 
     /// Starts the engine and captures the hardware output sample rate.
@@ -311,6 +317,14 @@ final class AudioPlayer: ObservableObject {
             let rate: Double? = preferredSampleRate > 0 ? preferredSampleRate : nil
             reconnectGraph(sampleRate: rate)
             outputSampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
+            // For nil-format connections, graphSampleRate equals the hardware rate.
+            if rate == nil { graphSampleRate = outputSampleRate }
+            // Request a large I/O buffer to reduce HALC overload risk when
+            // Pro Tools Aux I/O is sharing the same CoreAudio device.
+            if let deviceID = resolvedOutputDeviceID() {
+                let ok = AudioDeviceManager.setBufferFrameSize(2048, forDeviceID: deviceID)
+                dbg("startEngine — setBufferFrameSize(2048) \(ok ? "OK" : "FAILED")")
+            }
             dbg("startEngine — OK, sr=\(outputSampleRate)")
         } catch {
             dbg("startEngine — FAILED: \(error)")
@@ -382,7 +396,8 @@ final class AudioPlayer: ObservableObject {
                     // capturedSampleTime is in the hardware (output) rate; scale to
                     // the file's native rate so both sides of the subtraction match.
                     if let file = self.audioFile {
-                        let rateRatio = file.fileFormat.sampleRate / (self.playerNode.lastRenderTime?.sampleRate ?? file.fileFormat.sampleRate)
+                        let connRate  = self.graphSampleRate > 0 ? self.graphSampleRate : (self.playerNode.lastRenderTime?.sampleRate ?? file.fileFormat.sampleRate)
+                        let rateRatio = file.fileFormat.sampleRate / connRate
                         let scaledCaptured = AVAudioFramePosition(Double(capturedSampleTime) * rateRatio)
                         self.seekFrame = loopStart - scaledCaptured
                     } else {
@@ -403,9 +418,13 @@ final class AudioPlayer: ObservableObject {
 
     private func startPositionTimer() {
         timer?.cancel()
-        timer = Timer.publish(every: 1.0 / 24.0, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in self?.updatePosition() }
+        let t = DispatchSource.makeTimerSource(queue: .global(qos: .userInteractive))
+        t.schedule(deadline: .now(), repeating: 1.0 / 60.0)
+        t.setEventHandler { [weak self] in
+            DispatchQueue.main.async { self?.updatePosition() }
+        }
+        t.resume()
+        timer = t
     }
 
     private var _nilPlayerTimeCount = 0
@@ -433,10 +452,13 @@ final class AudioPlayer: ObservableObject {
         }
         _nilPlayerTimeCount = 0
 
-        // playerTime.sampleTime is in the player node's output format rate (= hardware rate),
-        // but seekFrame and file.length are in the file's native sample rate.
-        // Scale so all three are in the same unit before dividing.
-        let rateRatio = file.fileFormat.sampleRate / playerTime.sampleRate
+        // playerTime.sampleTime is in the player node's connection rate (graphSampleRate).
+        // seekFrame and file.length are in the file's native sample rate.
+        // Scale so all three are in the same unit.
+        // Use graphSampleRate (captured at engine start) rather than playerTime.sampleRate,
+        // which can transiently report the wrong value during HAL reconfiguration.
+        let connectionRate = graphSampleRate > 0 ? graphSampleRate : playerTime.sampleRate
+        let rateRatio = file.fileFormat.sampleRate / connectionRate
         let scaledSampleTime = AVAudioFramePosition(Double(playerTime.sampleTime) * rateRatio)
 
         let frame    = seekFrame + scaledSampleTime

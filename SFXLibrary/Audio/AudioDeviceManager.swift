@@ -82,6 +82,23 @@ enum AudioDeviceManager {
 
     // MARK: - Device properties
 
+    /// Sets the I/O buffer frame size on the given device.
+    /// Larger buffers reduce the chance of HALC I/O overloads at the cost of latency.
+    @discardableResult
+    static func setBufferFrameSize(_ frames: UInt32, forDeviceID deviceID: AudioDeviceID) -> Bool {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSize,
+            mScope:    kAudioObjectPropertyScopeGlobal,
+            mElement:  kAudioObjectPropertyElementMain
+        )
+        var mutableFrames = frames
+        let err = AudioObjectSetPropertyData(
+            deviceID, &addr, 0, nil,
+            UInt32(MemoryLayout<UInt32>.size), &mutableFrames
+        )
+        return err == noErr
+    }
+
     /// The current nominal sample rate of the given device, or 0 on failure.
     static func nominalSampleRate(forDeviceID deviceID: AudioDeviceID) -> Double {
         var addr = AudioObjectPropertyAddress(
