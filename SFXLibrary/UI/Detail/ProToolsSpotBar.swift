@@ -46,7 +46,7 @@ struct ProToolsSpotBar: View {
             fileURL:          spotURL,
             contentStartSecs: (player.selectionStart ?? 0.0) * duration,
             contentEndSecs:   (player.selectionEnd   ?? 1.0) * duration,
-            handles:          env.spotHandles,
+            handles:          0,
             fileSampleRate:   sampleRate
         )
         await run {

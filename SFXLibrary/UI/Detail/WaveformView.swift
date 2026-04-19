@@ -9,9 +9,17 @@ struct WaveformView: View {
     let playOnClick: Bool
     var waveColor:   Color = .accentColor
 
-    private let waveBackground = Color(white: 0.07)
+    @Environment(\.colorScheme) private var colorScheme
+    private var waveBackground: Color {
+        switch env.appearanceMode {
+        case "warm":  return Color(red: 0.95, green: 0.90, blue: 0.78)   // warm parchment
+        case "light": return Color(white: 0.93)
+        default:      return Color(white: 0.07)                           // dark
+        }
+    }
 
     @EnvironmentObject var player: AudioPlayer
+    @Environment(AppEnvironment.self) var env
 
     // Waveform data — one sub-array per channel
     @State private var peaks: [[Float]] = []
@@ -86,7 +94,7 @@ struct WaveformView: View {
                             div.move(to:    CGPoint(x: 0,          y: y))
                             div.addLine(to: CGPoint(x: size.width, y: y))
                         }
-                        ctx.stroke(div, with: .color(.white.opacity(0.15)),
+                        ctx.stroke(div, with: .color(Color.primary.opacity(0.15)),
                                    style: StrokeStyle(lineWidth: 0.5))
                     }
                 }
@@ -128,7 +136,7 @@ struct WaveformView: View {
                 // ── Playhead ─────────────────────────────────────────────────
                 if vPlay >= 0 && vPlay <= 1 {
                     Rectangle()
-                        .fill(Color.white.opacity(0.9))
+                        .fill(Color.primary.opacity(0.9))
                         .frame(width: 1.5)
                         .offset(x: geo.size.width * CGFloat(vPlay) - 0.75)
                 }
@@ -148,10 +156,10 @@ struct WaveformView: View {
                                      ? String(format: "%.1f×", zoomLevel)
                                      : String(format: "%.0f×", zoomLevel))
                                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                    .foregroundColor(.white.opacity(0.80))
+                                    .foregroundColor(.secondary)
                                     .padding(.horizontal, 5)
                                     .padding(.vertical, 3)
-                                    .background(Color.black.opacity(0.55))
+                                    .background(.regularMaterial)
                                     .clipShape(RoundedRectangle(cornerRadius: 4))
                             }
                             .buttonStyle(.plain)

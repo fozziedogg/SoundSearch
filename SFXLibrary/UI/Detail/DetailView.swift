@@ -126,7 +126,7 @@ struct FileInfoView: View {
             HStack {
                 Text("Metadata")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(Color(white: 0.70))
+                    .foregroundColor(.secondary)
                     .textCase(.uppercase)
                     .tracking(1.5)
                 Spacer()
@@ -151,10 +151,10 @@ struct FileInfoView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.black.opacity(0.55))
+            .background(.bar)
             .overlay(alignment: .bottom) {
                 Rectangle()
-                    .fill(Color.white.opacity(0.10))
+                    .fill(Color(.separatorColor))
                     .frame(height: 0.5)
             }
             .onHover { hovering in
@@ -193,17 +193,17 @@ struct PanelHeader: View {
         HStack {
             Text(title)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(Color(white: 0.70))
+                .foregroundColor(.secondary)
                 .textCase(.uppercase)
                 .tracking(1.5)
             Spacer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.black.opacity(0.55))
+        .background(.bar)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color.white.opacity(0.10))
+                .fill(Color(.separatorColor))
                 .frame(height: 0.5)
         }
     }
@@ -228,7 +228,7 @@ private struct WaveformResizeHandle: View {
 
             // Visual indicator
             RoundedRectangle(cornerRadius: 1)
-                .fill(isHovering ? Color.accentColor.opacity(0.6) : Color.white.opacity(0.12))
+                .fill(isHovering ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.15))
                 .frame(width: 32, height: 2)
         }
         .onHover { hovering in
@@ -277,7 +277,7 @@ private struct TechnicalInfoView: View {
             .foregroundColor(.secondary)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background(Color.white.opacity(0.07))
+            .background(Color.primary.opacity(0.07))
             .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 }

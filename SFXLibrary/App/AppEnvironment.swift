@@ -150,14 +150,6 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(autoAddToProject, forKey: "autoAddToProject") }
     }
 
-    /// Seconds of extra audio included before and after content when spotting via PTSL (PT 2025.06+).
-    var spotHandles: Double = {
-        let v = UserDefaults.standard.double(forKey: "spotHandles")
-        return v > 0 ? v : 0.5
-    }() {
-        didSet { UserDefaults.standard.set(spotHandles, forKey: "spotHandles") }
-    }
-
     /// When true, the volume slider resets to 100% when loading a new file.
     var resetVolumeOnLoad: Bool = {
         return UserDefaults.standard.bool(forKey: "resetVolumeOnLoad")   // default false
@@ -177,6 +169,11 @@ final class AppEnvironment {
         return UserDefaults.standard.bool(forKey: "grahamRogersMode")   // default false
     }() {
         didSet { UserDefaults.standard.set(grahamRogersMode, forKey: "grahamRogersMode") }
+    }
+
+    /// "dark", "light", or "system". Controls the app-wide colour scheme.
+    var appearanceMode: String = UserDefaults.standard.string(forKey: "appearanceMode") ?? "dark" {
+        didSet { UserDefaults.standard.set(appearanceMode, forKey: "appearanceMode") }
     }
 
     /// Transient spot result shown in the player controls row. Cleared on new file selection.

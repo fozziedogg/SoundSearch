@@ -141,40 +141,28 @@ struct AudioSettingsView: View {
 
             Section {
                 Toggle("Focus Pro Tools after spot", isOn: $bEnv.focusProToolsOnSpot)
-                HStack(spacing: 4) {
-                    Text("Spot handles")
-                    Spacer()
-                    TextField("", value: $bEnv.spotHandles,
-                              format: .number.precision(.fractionLength(1...2)))
-                        .multilineTextAlignment(.trailing)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 56)
-                    Text("s")
-                        .foregroundColor(.secondary)
-                    Stepper("", value: $bEnv.spotHandles, in: 0...60, step: 0.5)
-                        .labelsHidden()
-                }
             } header: {
                 Text("Pro Tools Spot")
-            } footer: {
-                Text("Extra audio included before and after the content when using Spot to PT (Pro Tools 2025.06+).")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
             }
 
             Section {
+                Picker("Appearance", selection: $bEnv.appearanceMode) {
+                    Text("Dark").tag("dark")
+                    Text("Warm").tag("warm")
+                    Text("Light").tag("light")
+                }
                 Toggle("Graham Rogers Mode", isOn: $bEnv.grahamRogersMode)
             } header: {
                 Text("Accessibility")
             } footer: {
-                Text("Replaces green/red with teal/orange throughout the interface, making status indicators distinguishable for red-green colour blindness.")
+                Text("Graham Rogers Mode replaces green/red with teal/orange throughout the interface, making status indicators distinguishable for red-green colour blindness.")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
 
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 500)
+        .frame(width: 460, height: 490)
         .onAppear { refreshDevices() }
     }
 

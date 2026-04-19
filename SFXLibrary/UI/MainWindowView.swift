@@ -119,20 +119,21 @@ private struct BrowserDivider: View {
         HStack {
             Text("Browser")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(Color(white: 0.70))
+                .foregroundColor(.secondary)
                 .textCase(.uppercase)
                 .tracking(1.5)
             Spacer()
             Image(systemName: "arrow.up.and.down")
                 .font(.system(size: 9, weight: .medium))
-                .foregroundColor(Color(white: isHovering ? 0.65 : 0.42))
+                .foregroundColor(.secondary.opacity(isHovering ? 0.8 : 0.4))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.black.opacity(isHovering ? 0.65 : 0.55))
+        .background(.bar)
+        .overlay(Color.primary.opacity(isHovering ? 0.04 : 0))
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color.white.opacity(0.10))
+                .fill(Color(.separatorColor))
                 .frame(height: 0.5)
         }
         .onHover { hovering in
