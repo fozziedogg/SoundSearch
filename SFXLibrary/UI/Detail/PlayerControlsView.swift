@@ -121,10 +121,10 @@ struct PlayerControlsView: View {
 
     private func formatTime(_ seconds: Double) -> String {
         let s  = Int(seconds)
-        let ms = Int((seconds - Double(s)) * 1000)
+        let cs = Int((seconds - Double(s)) * 100)
         let m  = s / 60
         let se = s % 60
-        return String(format: "%d:%02d.%03d", m, se, ms)
+        return String(format: "%d:%02d.%02d", m, se, cs)
     }
 }
 

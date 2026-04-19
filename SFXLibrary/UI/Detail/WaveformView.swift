@@ -218,6 +218,10 @@ struct WaveformView: View {
                             player.selectionEnd   = nil
                             player.seek(to: frac)
                             if playOnClick && !player.isPlaying { player.play() }
+                        } else if player.isPlaying && player.loopEnabled {
+                            // Loop was scheduled with the old selection bounds — restart
+                            // so play() picks up the new selection immediately.
+                            player.play()
                         }
                     }
             )

@@ -10,8 +10,8 @@ struct PreviewView: View {
     @State private var waveformHeight: CGFloat = 80
     @State private var fileNotFound: Bool = false
 
-    // Fixed chrome below the waveform: resize handle (8) + PT row (30) + controls (~62) + header (27)
-    private let waveformChrome: CGFloat = 127
+    // Fixed chrome below the waveform: resize handle (8) + PT row (30) + controls (~62) + header (27) + file info strip (~50)
+    private let waveformChrome: CGFloat = 177
 
     var body: some View {
         GeometryReader { geo in
@@ -19,6 +19,18 @@ struct PreviewView: View {
             let clampedWH = min(waveformHeight, max(40, geo.size.height - waveformChrome))
             VStack(alignment: .leading, spacing: 0) {
                 PanelHeader(title: "Preview")
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(file.filename)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.primary.opacity(0.85))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    TechnicalInfoView(file: file)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
 
                 WaveformView(url: URL(fileURLWithPath: file.fileURL),
                              mtime: file.mtime,
@@ -97,7 +109,7 @@ struct PreviewView: View {
     }
 }
 
-// MARK: - File Info panel (metadata + technical + Pro Tools spot)
+// MARK: - Metadata panel
 
 struct FileInfoView: View {
     @Environment(AppEnvironment.self) var env
@@ -112,7 +124,7 @@ struct FileInfoView: View {
         VStack(spacing: 0) {
             // Header with expand/collapse toggle — also acts as resize drag handle
             HStack {
-                Text("File Info")
+                Text("Metadata")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(Color(white: 0.70))
                     .textCase(.uppercase)
@@ -135,7 +147,7 @@ struct FileInfoView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(isExpanded ? "Hide File Info" : "Show File Info")
+                .help(isExpanded ? "Hide Metadata" : "Show Metadata")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -163,25 +175,8 @@ struct FileInfoView: View {
             if isExpanded {
                 Divider()
                 ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(file.filename)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.primary.opacity(0.85))
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 10)
-                            .padding(.bottom, 4)
-
-                        TechnicalInfoView(file: file)
-                            .padding(.horizontal, 12)
-                            .padding(.bottom, 10)
-
-                        Divider()
-
-                        MetadataFormView(file: file)
-                            .padding(12)
-                    }
+                    MetadataFormView(file: file)
+                        .padding(12)
                 }
                 .scrollIndicators(.never)
             }

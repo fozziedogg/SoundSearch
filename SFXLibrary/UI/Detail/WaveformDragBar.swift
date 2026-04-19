@@ -55,20 +55,17 @@ struct WaveformDragBar: View {
     private var labelText: String {
         switch env.dragExportMode {
         case .wholeFile:
-            if hasSelection, let s = player.selectionStart {
-                return "⠿  Drag to PT Timeline  •  Full file, spot at \(fmt(s * player.duration))"
-            }
             return player.duration > 0
-                ? "⠿  Drag to PT Timeline  •  Full file  (\(fmt(player.duration)))"
-                : "⠿  Drag to PT Timeline"
+                ? "⠿  Drag to Timeline  •  Full file  (\(fmt(player.duration)))"
+                : "⠿  Drag to Timeline"
         case .selectionOnly:
             if hasSelection, let s = player.selectionStart, let e = player.selectionEnd {
                 let dur = (e - s) * player.duration
-                return "⠿  Drag to PT Timeline  •  Selection  \(fmt(s * player.duration)) – \(fmt(e * player.duration))  (\(fmt(dur)))"
+                return "⠿  Drag to Timeline  •  Selection  (\(fmt(dur)))"
             }
             return player.duration > 0
-                ? "⠿  Drag to PT Timeline  •  Full file  (\(fmt(player.duration)))"
-                : "⠿  Drag to PT Timeline"
+                ? "⠿  Drag to Timeline  •  Full file  (\(fmt(player.duration)))"
+                : "⠿  Drag to Timeline"
         }
     }
 
@@ -77,7 +74,7 @@ struct WaveformDragBar: View {
         return e > s
     }
 
-    private func fmt(_ t: Double) -> String { String(format: "%.3fs", t) }
+    private func fmt(_ t: Double) -> String { String(format: "%.2fs", t) }
 
     // MARK: - Drag URL computation
 
