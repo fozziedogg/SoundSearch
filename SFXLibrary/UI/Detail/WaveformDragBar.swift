@@ -248,16 +248,9 @@ enum DragBarHelper {
                                             frameCapacity: frameCount)
         else { throw ExportError.bufferAllocationFailed }
         try src.read(into: buffer, frameCount: frameCount)
-        let fmt = src.fileFormat
-        let writeSettings: [String: Any] = [
-            AVFormatIDKey:               kAudioFormatLinearPCM,
-            AVSampleRateKey:             fmt.sampleRate,
-            AVNumberOfChannelsKey:       fmt.channelCount,
-            AVLinearPCMBitDepthKey:      fmt.settings[AVLinearPCMBitDepthKey] ?? 24,
-            AVLinearPCMIsFloatKey:       fmt.settings[AVLinearPCMIsFloatKey]  ?? false,
-            AVLinearPCMIsNonInterleaved: false,
-        ]
-        let outFile = try AVAudioFile(forWriting: dest, settings: writeSettings)
+        // Write in the buffer's native processing format (Float32) — matching the source
+        // file's integer format against a Float32 buffer causes FigExportCommmon err=-12785.
+        let outFile = try AVAudioFile(forWriting: dest, settings: buffer.format.settings)
         try outFile.write(from: buffer)
         return dest
     }

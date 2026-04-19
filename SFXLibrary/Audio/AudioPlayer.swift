@@ -38,6 +38,10 @@ final class AudioPlayer: ObservableObject {
     // Incremented each schedule call; lets completion callbacks self-invalidate.
     private var scheduleGeneration = 0
 
+    // Debounces AVAudioEngineConfigurationChange — rapid-fire notifications
+    // (e.g. Bluetooth glitching, PT Aux I/O reconfiguring) only trigger one restart.
+    private var configChangeWork: DispatchWorkItem?
+
     init() {
         engine.attach(playerNode)
         engine.connect(playerNode, to: engine.mainMixerNode, format: nil)
@@ -71,9 +75,10 @@ final class AudioPlayer: ObservableObject {
                 self.timer?.cancel()
                 self.seekFrame = 0
             }
-            // Short delay lets the triggering app (e.g. Pro Tools) finish its own
-            // reconfiguration before we try to reclaim the device.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            // Debounce: cancel any pending restart so rapid-fire notifications
+            // (Bluetooth glitching, PT Aux I/O reconfiguring) only trigger one restart.
+            self.configChangeWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
                 self.reconnectGraph()
                 self.startEngine()
@@ -83,6 +88,10 @@ final class AudioPlayer: ObservableObject {
                     self.play()
                 }
             }
+            self.configChangeWork = work
+            // Short delay lets the triggering app (e.g. Pro Tools) finish its own
+            // reconfiguration before we try to reclaim the device.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
         }
     }
 
