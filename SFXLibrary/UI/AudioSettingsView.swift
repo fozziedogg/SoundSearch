@@ -162,9 +162,19 @@ struct AudioSettingsView: View {
                     .foregroundColor(.secondary)
             }
 
+            Section {
+                Toggle("Graham Rogers Mode", isOn: $bEnv.grahamRogersMode)
+            } header: {
+                Text("Accessibility")
+            } footer: {
+                Text("Replaces green/red with teal/orange throughout the interface, making status indicators distinguishable for red-green colour blindness.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 460)
+        .frame(width: 460, height: 500)
         .onAppear { refreshDevices() }
     }
 

@@ -73,6 +73,10 @@ struct ProToolsSpotBar: View {
                           || $0.localizedName    == "Pro Tools" }?
                     .activate(options: .activateIgnoringOtherApps)
             }
+            // Pro Tools may change the CoreAudio device sample rate when it receives audio,
+            // killing AVAudioEngine. Wait for PT to settle then recover if needed.
+            try? await Task.sleep(for: .milliseconds(600))
+            player.recoverEngineIfNeeded()
         } catch {
             env.spotFeedback = .failure(error.localizedDescription)
         }

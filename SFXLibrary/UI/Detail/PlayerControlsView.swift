@@ -33,11 +33,12 @@ struct PlayerControlsView: View {
 
             // Volume row  (slider goes to 200% — above 100% boosts beyond unity)
             HStack(spacing: 8) {
+                let boostColor: Color = env.grahamRogersMode ? .yellow : .orange
                 Image(systemName: player.volume < 0.01 ? "speaker.slash" :
                                   player.volume < 0.4  ? "speaker.wave.1" :
                                   player.volume < 0.75 ? "speaker.wave.2" : "speaker.wave.3")
                     .font(.system(size: 11))
-                    .foregroundColor(player.volume > 1.0 ? .orange : .secondary)
+                    .foregroundColor(player.volume > 1.0 ? boostColor : .secondary)
                     .frame(width: 16)
                 VolumeSlider(value: $player.volume, range: 0...2) {
                     player.volume = 1.0
@@ -45,7 +46,7 @@ struct PlayerControlsView: View {
                 .help("Double-click to reset to unity")
                 Text(String(format: "%d%%", Int(player.volume * 100)))
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(player.volume > 1.0 ? .orange : .secondary)
+                    .foregroundColor(player.volume > 1.0 ? boostColor : .secondary)
                     .frame(width: 36, alignment: .trailing)
             }
 
@@ -56,10 +57,10 @@ struct PlayerControlsView: View {
                         switch feedback {
                         case .success:
                             Label("Spotted", systemImage: "checkmark.circle.fill")
-                                .foregroundColor(.green)
+                                .foregroundColor(env.grahamRogersMode ? .teal : .green)
                         case .failure(let msg):
                             Label(msg, systemImage: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
+                                .foregroundColor(env.grahamRogersMode ? .orange : .red)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                                 .help(msg)

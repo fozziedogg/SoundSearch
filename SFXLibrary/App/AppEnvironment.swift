@@ -172,6 +172,13 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(stopOnDefocus, forKey: "stopOnDefocus") }
     }
 
+    /// Uses a blue/orange palette instead of green/red — safe for red-green colour blindness.
+    var grahamRogersMode: Bool = {
+        return UserDefaults.standard.bool(forKey: "grahamRogersMode")   // default false
+    }() {
+        didSet { UserDefaults.standard.set(grahamRogersMode, forKey: "grahamRogersMode") }
+    }
+
     /// Transient spot result shown in the player controls row. Cleared on new file selection.
     var spotFeedback: SpotFeedback? = nil
 

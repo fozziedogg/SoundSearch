@@ -53,8 +53,9 @@ final class AudioPlayer: ObservableObject {
         startEngine()
 
         // AVAudioEngine silently breaks if macOS reconfigures the audio graph
-        // (device enumeration at launch, system audio server restart, etc.).
-        // Reconnecting and restarting here recovers automatically.
+        // (device enumeration at launch, Pro Tools changing the session sample rate, etc.).
+        // Delay the restart so the triggering app (PT) has time to finish its own
+        // reconfiguration before we try to reclaim the device.
         NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine,
@@ -62,10 +63,21 @@ final class AudioPlayer: ObservableObject {
         ) { [weak self] _ in
             guard let self else { return }
             if self.isPlaying { self.stop() }
-            self.reconnectGraph()
-            self.startEngine()
-            self.engine.mainMixerNode.outputVolume = self.volume
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                guard let self else { return }
+                self.reconnectGraph()
+                self.startEngine()
+                self.engine.mainMixerNode.outputVolume = self.volume
+            }
         }
+    }
+
+    /// Restarts the engine if it has stopped (e.g. after Pro Tools changes the session sample rate).
+    func recoverEngineIfNeeded() {
+        guard !engine.isRunning else { return }
+        reconnectGraph()
+        startEngine()
+        engine.mainMixerNode.outputVolume = volume
     }
 
     // MARK: - Output device
