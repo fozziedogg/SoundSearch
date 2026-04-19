@@ -7,8 +7,11 @@ final class AudioPlayer: ObservableObject {
     @Published var isPlaying:    Bool   = false
     @Published var playPosition: Double = 0   // 0.0 – 1.0
     @Published var duration:     Double = 0
-    @Published var volume: Float = 1.0 {
-        didSet { engine.mainMixerNode.outputVolume = volume }
+    @Published var volume: Float = (UserDefaults.standard.object(forKey: "playerVolume") as? Float) ?? 1.0 {
+        didSet {
+            engine.mainMixerNode.outputVolume = volume
+            UserDefaults.standard.set(volume, forKey: "playerVolume")
+        }
     }
 
     /// Current waveform selection as fractions of total duration. nil = no selection.

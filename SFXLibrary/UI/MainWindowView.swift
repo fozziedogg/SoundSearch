@@ -64,9 +64,17 @@ struct MainWindowView: View {
                                        : nil)
                             }
                         } else {
-                            Text("Select a file")
-                                .foregroundColor(.secondary)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            VStack(alignment: .leading, spacing: 0) {
+                                PanelHeader(title: "Preview")
+                                Spacer()
+                                PlayerControlsView()
+                                    .environmentObject(env.audioPlayer)
+                                    .environment(env)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                                    .padding(.bottom, 4)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                     }
                     .frame(height: clamped)
