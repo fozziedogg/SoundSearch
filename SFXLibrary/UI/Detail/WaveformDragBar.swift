@@ -292,16 +292,10 @@ enum DragBarHelper {
             try FileManager.default.removeItem(at: dest)
         }
 
-        let fmt = src.fileFormat
-        let writeSettings: [String: Any] = [
-            AVFormatIDKey:               kAudioFormatLinearPCM,
-            AVSampleRateKey:             fmt.sampleRate,
-            AVNumberOfChannelsKey:       fmt.channelCount,
-            AVLinearPCMBitDepthKey:      fmt.settings[AVLinearPCMBitDepthKey] ?? 24,
-            AVLinearPCMIsFloatKey:       fmt.settings[AVLinearPCMIsFloatKey]  ?? false,
-            AVLinearPCMIsNonInterleaved: false,
-        ]
-        let outFile = try AVAudioFile(forWriting: dest, settings: writeSettings)
+        // Write in the buffer's native processing format (Float32, non-interleaved).
+        // Attempting to match the original file's integer format causes a CoreMedia
+        // format-conversion failure (FigExportCommmon err=-12785). PT handles Float32 WAV fine.
+        let outFile = try AVAudioFile(forWriting: dest, settings: buffer.format.settings)
         try outFile.write(from: buffer)
         return dest
     }
