@@ -41,6 +41,11 @@ final class AudioPlayer: ObservableObject {
     // Debounces AVAudioEngineConfigurationChange — rapid-fire notifications
     // (e.g. Bluetooth glitching, PT Aux I/O reconfiguring) only trigger one restart.
     private var configChangeWork: DispatchWorkItem?
+    // Preserved across debounce cancellations so rapid-fire notifications don't
+    // lose the intent to resume (the second notification sees isPlaying == false
+    // because the first already stopped the node).
+    private var configChangeShouldResume:  Bool   = false
+    private var configChangeResumePosition: Double = 0
 
     init() {
         engine.attach(playerNode)
@@ -66,9 +71,12 @@ final class AudioPlayer: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            let wasPlaying    = self.isPlaying
-            let savedPosition = self.playPosition
-            if wasPlaying {
+            // Only update the resume target when we're actually playing — a second
+            // notification would see isPlaying==false (we already stopped) and lose
+            // the intent to resume. configChangeShouldResume persists until consumed.
+            if self.isPlaying {
+                self.configChangeShouldResume   = true
+                self.configChangeResumePosition = self.playPosition
                 self.scheduleGeneration += 1
                 self.playerNode.stop()
                 self.isPlaying = false
@@ -80,11 +88,14 @@ final class AudioPlayer: ObservableObject {
             self.configChangeWork?.cancel()
             let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
+                let shouldResume = self.configChangeShouldResume
+                let resumePos    = self.configChangeResumePosition
+                self.configChangeShouldResume = false
                 self.reconnectGraph()
                 self.startEngine()
                 self.engine.mainMixerNode.outputVolume = self.volume
-                if wasPlaying {
-                    self.playPosition = savedPosition
+                if shouldResume {
+                    self.playPosition = resumePos
                     self.play()
                 }
             }
