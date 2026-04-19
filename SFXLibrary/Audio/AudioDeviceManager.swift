@@ -80,6 +80,21 @@ enum AudioDeviceManager {
 
     // MARK: - Private helpers
 
+    // MARK: - Device properties
+
+    /// The current nominal sample rate of the given device, or 0 on failure.
+    static func nominalSampleRate(forDeviceID deviceID: AudioDeviceID) -> Double {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope:    kAudioObjectPropertyScopeGlobal,
+            mElement:  kAudioObjectPropertyElementMain
+        )
+        var rate: Float64 = 0
+        var size = UInt32(MemoryLayout<Float64>.size)
+        guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &rate) == noErr else { return 0 }
+        return rate
+    }
+
     private static func hasOutputChannels(_ deviceID: AudioDeviceID) -> Bool {
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamConfiguration,

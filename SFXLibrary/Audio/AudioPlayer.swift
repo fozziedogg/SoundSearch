@@ -35,6 +35,16 @@ final class AudioPlayer: ObservableObject {
     /// Sample rate the engine's output node is actually running at (hardware rate).
     @Published var outputSampleRate: Double = 0
 
+    /// Explicit graph sample rate. 0 = auto (tracks output device via CoreAudio listener).
+    /// Persisted to UserDefaults; set from AppEnvironment when the user changes the picker.
+    var preferredSampleRate: Double = UserDefaults.standard.double(forKey: "preferredSampleRate") {
+        didSet {
+            guard oldValue != preferredSampleRate else { return }
+            UserDefaults.standard.set(preferredSampleRate, forKey: "preferredSampleRate")
+            applyPreferredSampleRate()
+        }
+    }
+
     private let engine     = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private var audioFile:  AVAudioFile?
@@ -58,6 +68,11 @@ final class AudioPlayer: ObservableObject {
     // Suppresses config-change responses briefly after we restart the engine,
     // breaking the feedback loop where our own restart triggers another notification.
     private var suppressConfigChangeUntil: Date = .distantPast
+
+    // CoreAudio kAudioDevicePropertyNominalSampleRate listener —
+    // fires when Pro Tools (or anything else) changes the device's session rate.
+    private var sampleRateListenerDeviceID: AudioDeviceID = 0
+    private var sampleRateListenerBlock: AudioObjectPropertyListenerBlock?
 
     // Debug helpers — writes directly to ~/Desktop/sfxaudio.log, bypassing Xcode's stdout pipe.
     private static let debugAudio = true
@@ -93,6 +108,12 @@ final class AudioPlayer: ObservableObject {
 
         startEngine()
         engine.mainMixerNode.outputVolume = volume
+
+        // Track sample rate changes on the output device so we can reconnect
+        // the graph immediately when Pro Tools opens a session at a different rate.
+        if let deviceID = resolvedOutputDeviceID() {
+            registerSampleRateListener(for: deviceID)
+        }
 
         // macOS stops AVAudioEngine whenever it reconfigures the audio graph —
         // device enumeration at launch, Pro Tools changing the session sample rate, etc.
@@ -140,7 +161,7 @@ final class AudioPlayer: ObservableObject {
                 }
             }
             self.configChangeWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
         }
     }
 
@@ -180,6 +201,9 @@ final class AudioPlayer: ObservableObject {
         // causing glitches.
         reconnectGraph()
         startEngine()
+        if let deviceID = resolvedOutputDeviceID() {
+            registerSampleRateListener(for: deviceID)
+        }
     }
 
     // MARK: - Load
@@ -262,22 +286,30 @@ final class AudioPlayer: ObservableObject {
 
     // MARK: - Private
 
-    /// Disconnects and reconnects the processing graph so AVAudioEngine
-    /// re-derives node formats from the current hardware rate on next start.
-    private func reconnectGraph() {
+    /// Disconnects and reconnects the processing graph.
+    /// Pass `sampleRate` to lock the graph to a specific rate; nil lets AVAudioEngine
+    /// derive the format from the hardware on the next start.
+    private func reconnectGraph(sampleRate: Double? = nil) {
         engine.disconnectNodeOutput(playerNode)
-        engine.connect(playerNode, to: engine.mainMixerNode, format: nil)
+        let format: AVAudioFormat? = sampleRate.flatMap {
+            AVAudioFormat(standardFormatWithSampleRate: $0, channels: 2)
+        }
+        engine.connect(playerNode, to: engine.mainMixerNode, format: format)
     }
 
     /// Starts the engine and captures the hardware output sample rate.
-    /// Also sets the suppression window so any AVAudioEngineConfigurationChange
-    /// fired by this restart is ignored — prevents the feedback loop where our
-    /// own restart triggers another notification and another restart.
+    /// Reconnects the graph AFTER starting so the node format is derived from
+    /// the actually-running hardware rate, not a stale cached value.
     private func startEngine() {
-        suppressConfigChangeUntil = Date().addingTimeInterval(1.0)
-        dbg("startEngine — suppressing config changes for 1s")
+        suppressConfigChangeUntil = Date().addingTimeInterval(2.0)
+        dbg("startEngine — suppressing config changes for 2s")
         do {
             try engine.start()
+            // Reconnect now that the engine is running so the format is derived from
+            // the actual settled hardware rate, not a stale pre-start value.
+            // If the user has pinned a rate, use that instead of nil.
+            let rate: Double? = preferredSampleRate > 0 ? preferredSampleRate : nil
+            reconnectGraph(sampleRate: rate)
             outputSampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
             dbg("startEngine — OK, sr=\(outputSampleRate)")
         } catch {
@@ -418,5 +450,104 @@ final class AudioPlayer: ObservableObject {
         if abs(newPos - playPosition) > 0.0002 {
             playPosition = newPos
         }
+    }
+
+    // MARK: - Sample rate listener
+
+    private func resolvedOutputDeviceID() -> AudioDeviceID? {
+        currentOutputDeviceUID.isEmpty
+            ? AudioDeviceManager.systemDefaultOutputDeviceID()
+            : AudioDeviceManager.deviceID(forUID: currentOutputDeviceUID)
+    }
+
+    private func registerSampleRateListener(for deviceID: AudioDeviceID) {
+        unregisterSampleRateListener()
+        guard deviceID != 0 else { return }
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            DispatchQueue.main.async { self?.handleDeviceSampleRateChange() }
+        }
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope:    kAudioObjectPropertyScopeGlobal,
+            mElement:  kAudioObjectPropertyElementMain
+        )
+        AudioObjectAddPropertyListenerBlock(deviceID, &addr, nil, block)
+        sampleRateListenerDeviceID = deviceID
+        sampleRateListenerBlock    = block
+        dbg("sampleRateListener — registered on device \(deviceID)")
+    }
+
+    private func unregisterSampleRateListener() {
+        guard sampleRateListenerDeviceID != 0, let block = sampleRateListenerBlock else { return }
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope:    kAudioObjectPropertyScopeGlobal,
+            mElement:  kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(sampleRateListenerDeviceID, &addr, nil, block)
+        sampleRateListenerDeviceID = 0
+        sampleRateListenerBlock    = nil
+    }
+
+    /// Called by the CoreAudio listener when the output device's nominal sample rate changes.
+    /// Restarts the engine with the new rate so our graph stays in sync with the PT session.
+    private func handleDeviceSampleRateChange() {
+        guard Date() > suppressConfigChangeUntil else {
+            dbg("sampleRateListener — SUPPRESSED (our own restart)")
+            return
+        }
+        // If the user has pinned a rate, the device rate is irrelevant.
+        guard preferredSampleRate == 0 else {
+            dbg("sampleRateListener — ignored (pinned to \(Int(preferredSampleRate)) Hz)")
+            return
+        }
+        let newRate = AudioDeviceManager.nominalSampleRate(forDeviceID: sampleRateListenerDeviceID)
+        guard newRate > 0 else { return }
+        dbg("sampleRateListener — device rate → \(Int(newRate)) Hz, restarting engine")
+
+        let wasPlaying = isPlaying
+        let resumePos  = playPosition
+        if wasPlaying {
+            scheduleGeneration += 1
+            playerNode.stop()
+            isPlaying = false
+            timer?.cancel()
+            seekFrame = 0
+        }
+        engine.stop()
+        reconnectGraph(sampleRate: newRate)
+        startEngine()
+        engine.mainMixerNode.outputVolume = volume
+        if wasPlaying {
+            playPosition = resumePos
+            play()
+            dbg("sampleRateListener — playback resumed at \(String(format: "%.3f", resumePos))")
+        }
+    }
+
+    /// Applies a change to `preferredSampleRate` immediately: restarts the engine with the
+    /// new rate (or nil for auto) and resumes playback if it was active.
+    private func applyPreferredSampleRate() {
+        let wasPlaying = isPlaying
+        let resumePos  = playPosition
+        if wasPlaying {
+            scheduleGeneration += 1
+            playerNode.stop()
+            isPlaying = false
+            timer?.cancel()
+            seekFrame = 0
+        }
+        engine.stop()
+        reconnectGraph(sampleRate: preferredSampleRate > 0 ? preferredSampleRate : nil)
+        startEngine()
+        engine.mainMixerNode.outputVolume = volume
+        if wasPlaying {
+            playPosition = resumePos
+            play()
+        }
+    }
+
+    deinit {
+        unregisterSampleRateListener()
     }
 }

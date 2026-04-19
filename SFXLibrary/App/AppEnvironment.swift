@@ -176,6 +176,14 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(appearanceMode, forKey: "appearanceMode") }
     }
 
+    /// Explicit engine graph sample rate. 0 = auto (follows output device via CoreAudio listener).
+    var preferredSampleRate: Double = UserDefaults.standard.double(forKey: "preferredSampleRate") {
+        didSet {
+            UserDefaults.standard.set(preferredSampleRate, forKey: "preferredSampleRate")
+            audioPlayer.preferredSampleRate = preferredSampleRate
+        }
+    }
+
     /// Transient spot result shown in the player controls row. Cleared on new file selection.
     var spotFeedback: SpotFeedback? = nil
 

@@ -75,6 +75,16 @@ struct AudioSettingsView: View {
                     env.audioPlayer.setOutputDevice(uid: uid)
                 }
 
+                Picker("Engine Sample Rate", selection: $bEnv.preferredSampleRate) {
+                    Text("Auto (follow device)").tag(Double(0))
+                    Divider()
+                    Text("44.1 kHz").tag(Double(44100))
+                    Text("48 kHz").tag(Double(48000))
+                    Text("88.2 kHz").tag(Double(88200))
+                    Text("96 kHz").tag(Double(96000))
+                }
+                .pickerStyle(.menu)
+
                 HStack {
                     if env.audioPlayer.outputSampleRate > 0 {
                         Text("Running at \(Int(env.audioPlayer.outputSampleRate / 1000)) kHz")
@@ -91,7 +101,7 @@ struct AudioSettingsView: View {
             } header: {
                 Text("Audio Output")
             } footer: {
-                Text("Choose the CoreAudio device the preview engine sends audio to. Pro Tools Aux I/O and aggregate devices appear here when active. Switch devices while Pro Tools is running to match its session sample rate.")
+                Text("Choose the CoreAudio device the preview engine sends audio to. Engine Sample Rate: Auto tracks Pro Tools session rate changes automatically via CoreAudio. Pin to a specific rate if you always work at one rate and want to avoid restarts.")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
