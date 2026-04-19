@@ -160,6 +160,14 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(stopOnDefocus, forKey: "stopOnDefocus") }
     }
 
+    /// When true, the current preview volume is baked into audio delivered via drag or Spot to PT.
+    var commitVolumeOnExport: Bool = {
+        guard UserDefaults.standard.object(forKey: "commitVolumeOnExport") != nil else { return true }
+        return UserDefaults.standard.bool(forKey: "commitVolumeOnExport")
+    }() {
+        didSet { UserDefaults.standard.set(commitVolumeOnExport, forKey: "commitVolumeOnExport") }
+    }
+
     @ObservationIgnored private var sessionRestored = false
     @ObservationIgnored private var db: DatabasePool
     @ObservationIgnored private var projectsDB: DatabasePool

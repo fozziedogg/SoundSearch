@@ -10,8 +10,8 @@ struct PreviewView: View {
     @State private var waveformHeight: CGFloat = 80
     @State private var fileNotFound: Bool = false
 
-    // Fixed chrome below the waveform: resize handle (8) + drag bar (30) + spot bar (30) + controls (~62) + header (22)
-    private let waveformChrome: CGFloat = 152
+    // Fixed chrome below the waveform: resize handle (8) + PT row (30) + controls (~62) + header (27)
+    private let waveformChrome: CGFloat = 127
 
     var body: some View {
         GeometryReader { geo in
@@ -33,17 +33,16 @@ struct PreviewView: View {
                 WaveformResizeHandle(height: $waveformHeight)
                     .padding(.horizontal, 16)
 
-                WaveformDragBar(file: file)
-                    .environmentObject(env.audioPlayer)
-                    .frame(height: 26)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
-
-                ProToolsSpotBar(file: file)
-                    .environmentObject(env.audioPlayer)
-                    .frame(height: 26)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
+                HStack(spacing: 8) {
+                    WaveformDragBar(file: file)
+                        .environmentObject(env.audioPlayer)
+                        .frame(maxWidth: .infinity, maxHeight: 26)
+                    ProToolsSpotBar(file: file)
+                        .environmentObject(env.audioPlayer)
+                        .frame(height: 26)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
 
                 PlayerControlsView()
                     .environmentObject(env.audioPlayer)
@@ -115,7 +114,7 @@ struct FileInfoView: View {
             HStack {
                 Text("File Info")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color(white: 0.70))
                     .textCase(.uppercase)
                     .tracking(1.5)
                 Spacer()
@@ -139,8 +138,13 @@ struct FileInfoView: View {
                 .help(isExpanded ? "Hide File Info" : "Show File Info")
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Color.black.opacity(0.25))
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.55))
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.10))
+                    .frame(height: 0.5)
+            }
             .onHover { hovering in
                 guard onHeaderDrag != nil else { return }
                 if hovering { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
@@ -160,9 +164,18 @@ struct FileInfoView: View {
                 Divider()
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 0) {
+                        Text(file.filename)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.primary.opacity(0.85))
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 10)
+                            .padding(.bottom, 4)
+
                         TechnicalInfoView(file: file)
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
+                            .padding(.bottom, 10)
 
                         Divider()
 
@@ -185,14 +198,19 @@ struct PanelHeader: View {
         HStack {
             Text(title)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(Color(white: 0.70))
                 .textCase(.uppercase)
                 .tracking(1.5)
             Spacer()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color.black.opacity(0.25))
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.55))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .frame(height: 0.5)
+        }
     }
 }
 

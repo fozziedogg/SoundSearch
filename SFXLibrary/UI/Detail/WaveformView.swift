@@ -236,6 +236,14 @@ struct WaveformView: View {
                 if playOnClick && !player.isPlaying { player.play() }
             }
 
+            .background(
+                Button("") {
+                    player.selectionStart = 0.0
+                    player.selectionEnd   = 1.0
+                }
+                .keyboardShortcut("a", modifiers: .command)
+                .opacity(0)
+            )
             .onAppear { loadPeaks(width: max(Int(geo.size.width) * 8, 4096)) }
             .onChange(of: url) { _, _ in
                 zoomLevel   = 1.0

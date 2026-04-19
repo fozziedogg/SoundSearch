@@ -61,7 +61,7 @@ struct PlayerControlsView: View {
 
                 optionToggle(
                     icon: "cursorarrow.rays",
-                    label: "Click",
+                    label: "Click to Play",
                     help: "Play when clicking on the waveform",
                     isOn: env.playOnWaveformClick
                 ) { env.playOnWaveformClick.toggle() }

@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import Accelerate
 import UniformTypeIdentifiers
 
 // MARK: - Export mode
@@ -140,9 +141,18 @@ struct WaveformDragBar: View {
         }
 
         // Sanitise filename for Pro Tools (no colons, slashes, etc.)
-        let finalURL = ptSafeURL(deliverURL)
-        print("[Drag] delivering → \(finalURL.path)")
-        return finalURL
+        let sanitised = ptSafeURL(deliverURL)
+
+        // Bake preview volume into the delivered file when the setting is enabled.
+        let gain = player.volume
+        if env.commitVolumeOnExport, abs(gain - 1.0) > 0.001,
+           let gained = try? DragBarHelper.applyGain(to: sanitised, gain: gain) {
+            print("[Drag] gain \(String(format: "%.2f", gain))× applied → \(gained.path)")
+            return gained
+        }
+
+        print("[Drag] delivering → \(sanitised.path)")
+        return sanitised
     }
 
     /// Copies the file to a temp location with a PT-legal filename if needed.
@@ -238,6 +248,50 @@ enum DragBarHelper {
                                             frameCapacity: frameCount)
         else { throw ExportError.bufferAllocationFailed }
         try src.read(into: buffer, frameCount: frameCount)
+        let fmt = src.fileFormat
+        let writeSettings: [String: Any] = [
+            AVFormatIDKey:               kAudioFormatLinearPCM,
+            AVSampleRateKey:             fmt.sampleRate,
+            AVNumberOfChannelsKey:       fmt.channelCount,
+            AVLinearPCMBitDepthKey:      fmt.settings[AVLinearPCMBitDepthKey] ?? 24,
+            AVLinearPCMIsFloatKey:       fmt.settings[AVLinearPCMIsFloatKey]  ?? false,
+            AVLinearPCMIsNonInterleaved: false,
+        ]
+        let outFile = try AVAudioFile(forWriting: dest, settings: writeSettings)
+        try outFile.write(from: buffer)
+        return dest
+    }
+
+    /// Re-encodes `sourceURL` to a temp file with every sample scaled by `gain`.
+    /// Returns `sourceURL` unchanged if gain is within 0.1% of unity.
+    static func applyGain(to sourceURL: URL, gain: Float) throws -> URL {
+        guard abs(gain - 1.0) > 0.001 else { return sourceURL }
+
+        let src = try AVAudioFile(forReading: sourceURL)
+        let frameCount = AVAudioFrameCount(src.length)
+        guard frameCount > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: src.processingFormat,
+                                            frameCapacity: frameCount)
+        else { throw ExportError.bufferAllocationFailed }
+        try src.read(into: buffer)
+
+        // Scale all channels using vDSP (in-place).
+        if let floatData = buffer.floatChannelData {
+            var g = gain
+            for ch in 0..<Int(buffer.format.channelCount) {
+                vDSP_vsmul(floatData[ch], 1, &g, floatData[ch], 1,
+                           vDSP_Length(buffer.frameLength))
+            }
+        }
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SFXLibraryGain", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent(sourceURL.lastPathComponent)
+        if FileManager.default.fileExists(atPath: dest.path) {
+            try FileManager.default.removeItem(at: dest)
+        }
+
         let fmt = src.fileFormat
         let writeSettings: [String: Any] = [
             AVFormatIDKey:               kAudioFormatLinearPCM,

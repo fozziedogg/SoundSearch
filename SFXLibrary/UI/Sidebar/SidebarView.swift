@@ -122,7 +122,7 @@ private struct ProjectRow: View {
                     Spacer(minLength: 6)
                     if isTracked {
                         Circle()
-                            .fill(Color.accentColor)
+                            .fill(Color.green)
                             .frame(width: 7, height: 7)
                             .padding(.trailing, 2)
                     }

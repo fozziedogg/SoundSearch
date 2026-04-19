@@ -5,11 +5,11 @@ struct MainWindowView: View {
     @Environment(AppEnvironment.self) var env
     @State private var selectedFile: AudioFile?
     @State private var showFileInfo: Bool = true
-    @State private var detailHeight: CGFloat = 300
-    @State private var fileInfoHeight: CGFloat = 120
+    @State private var detailHeight: CGFloat = 380
+    @State private var fileInfoHeight: CGFloat = 140
 
-    private let minDetail: CGFloat  = 180
-    private let minBrowser: CGFloat = 140
+    private let minDetail: CGFloat  = 240
+    private let minBrowser: CGFloat = 120
     private let dividerHeight: CGFloat = 28   // height of the Browser header/handle
 
     private var windowTitle: String {
@@ -111,17 +111,22 @@ private struct BrowserDivider: View {
         HStack {
             Text("Browser")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(Color(white: 0.70))
                 .textCase(.uppercase)
                 .tracking(1.5)
             Spacer()
             Image(systemName: "arrow.up.and.down")
                 .font(.system(size: 9, weight: .medium))
-                .foregroundColor(.secondary.opacity(isHovering ? 0.7 : 0.3))
+                .foregroundColor(Color(white: isHovering ? 0.65 : 0.42))
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color.black.opacity(isHovering ? 0.35 : 0.25))
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(isHovering ? 0.65 : 0.55))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .frame(height: 0.5)
+        }
         .onHover { hovering in
             isHovering = hovering
             if hovering { NSCursor.resizeUpDown.push() }

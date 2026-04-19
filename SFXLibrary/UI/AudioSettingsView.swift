@@ -109,10 +109,11 @@ struct AudioSettingsView: View {
 
             Section {
                 Toggle("Stop playback when switching apps", isOn: $bEnv.stopOnDefocus)
+                Toggle("Commit volume on export", isOn: $bEnv.commitVolumeOnExport)
             } header: {
                 Text("Playback")
             } footer: {
-                Text("When enabled, audio stops automatically whenever you switch to another app.")
+                Text("Commit volume: when enabled, the current preview volume is baked into audio delivered via drag or Spot to PT. Unity gain (100%) is a no-op.")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -159,20 +160,6 @@ struct AudioSettingsView: View {
                     .foregroundColor(.secondary)
             }
 
-            Section {
-                Picker("Selection export", selection: $bEnv.dragExportMode) {
-                    ForEach(DragExportMode.allCases, id: \.self) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-            } header: {
-                Text("Pro Tools Drag")
-            } footer: {
-                Text("Controls what audio is delivered when dragging a waveform selection to the Pro Tools timeline. 'Whole file' delivers the original file with the BEXT timecode set to the selection start, so PT spots the clip at the right position and you can trim to taste.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-            }
         }
         .formStyle(.grouped)
         .frame(width: 460, height: 460)

@@ -17,7 +17,6 @@ struct ProToolsSpotBar: View {
     var body: some View {
         HStack(spacing: 6) {
             feedbackView
-            Spacer()
             if isWorking {
                 HStack(spacing: 4) {
                     ProgressView().controlSize(.mini)
@@ -63,8 +62,15 @@ struct ProToolsSpotBar: View {
         player.stop()
         begin("Spotting…")
 
+        var spotURL = URL(fileURLWithPath: file.fileURL)
+        let gain = player.volume
+        if env.commitVolumeOnExport, abs(gain - 1.0) > 0.001,
+           let gained = try? DragBarHelper.applyGain(to: spotURL, gain: gain) {
+            spotURL = gained
+        }
+
         let request = PTSLContentSpotRequest(
-            fileURL:          URL(fileURLWithPath: file.fileURL),
+            fileURL:          spotURL,
             contentStartSecs: (player.selectionStart ?? 0.0) * duration,
             contentEndSecs:   (player.selectionEnd   ?? 1.0) * duration,
             handles:          env.spotHandles,
