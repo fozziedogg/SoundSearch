@@ -47,7 +47,7 @@ final class AudioPlayer: ObservableObject {
     private let engine     = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private var audioFile:  AVAudioFile?
-    private var timer:      DispatchSourceTimer?
+    private var timer:      (any DispatchSourceTimer)?
     private var currentURL: URL?
 
     // The sample rate of the playerNode→mainMixerNode connection — set whenever we
