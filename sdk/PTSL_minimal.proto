@@ -1,0 +1,54 @@
+syntax = "proto3";
+package ptsl;
+
+// Only the command IDs this app uses.
+enum CommandId {
+    CId_None          = 0;
+    CId_Import        = 2;
+    CId_RegisterConnection        = 70;
+    CId_GetSessionSampleRate      = 35;
+    CId_GetPTSLVersion            = 55;
+    CId_GetTimelineSelection      = 82;
+    CId_ImportAudioToClipList     = 123;
+    CId_SpotClipsByID             = 124;
+    CId_CreateAudioClips          = 127;
+}
+
+enum TaskStatus {
+    TStatus_Queued      = 0;
+    TStatus_Pending     = 1;
+    TStatus_InProgress  = 2;
+    TStatus_Completed   = 3;
+    TStatus_Failed      = 4;
+}
+
+message RequestHeader {
+    string task_id               = 1;
+    CommandId command            = 2;
+    int32 version                = 3;
+    string session_id            = 4;
+    int32 version_minor          = 5;
+    int32 version_revision       = 6;
+}
+
+message Request {
+    RequestHeader header         = 1;
+    string request_body_json     = 2;
+}
+
+message ResponseHeader {
+    string task_id               = 1;
+    CommandId command            = 2;
+    TaskStatus status            = 3;
+    int32 progress               = 4;
+}
+
+message Response {
+    ResponseHeader header        = 1;
+    string response_body_json    = 2;
+    string response_error_json   = 3;
+}
+
+service PTSL {
+    rpc SendGrpcRequest(Request) returns (Response);
+}

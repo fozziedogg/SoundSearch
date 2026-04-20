@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xcodebuild -scheme SFXLibrary -destination 'platform=macOS' build)",
+      "Bash(grep -n \"SpotClipsByID\\\\|ImportAudioToClipList\" /Users/fozzie/developer/sfxlibrary/sdk/PTSL_SDK_CPP.2025.10.0.1267955/examples/ptslcmd/Source/*.cpp)",
+      "Read(//Users/fozzie/.claude/**)",
+      "Bash(python3 -m json.tool)",
+      "Bash(sed -n '175,260p' /Users/fozzie/developer/sfxlibrary/sdk/PTSL_SDK_CPP.2025.10.0.1267955/Source/PTSL.proto)",
+      "Bash(sed -n '5705,5860p' /Users/fozzie/developer/sfxlibrary/sdk/PTSL_SDK_CPP.2025.10.0.1267955/Source/PTSL.proto)",
+      "Bash(xcodebuild -project /Users/fozzie/developer/sfxlibrary/app/SFXLibrary.xcodeproj -scheme SFXLibrary -destination 'platform=macOS' build)",
+      "Bash(xcodebuild -workspace /Users/fozzie/developer/sfxlibrary/app/SFXLibrary.xcodeproj/project.xcworkspace -scheme SFXLibrary -destination 'platform=macOS' build)",
+      "Bash(swift /tmp/gen_icon.swift)",
+      "Bash(xcodebuild -showBuildSettings -scheme SFXLibrary)",
+      "Bash(xargs -I{} plutil -p {})",
+      "Bash(grep -v \"^$\")",
+      "Bash(brew list:*)",
+      "Bash(git -C /Users/fozzie/developer/sfxlibrary status)",
+      "Bash(git -C /Users/fozzie/developer/sfxlibrary/app status)",
+      "Bash(git checkout:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
