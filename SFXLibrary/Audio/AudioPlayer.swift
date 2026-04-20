@@ -310,6 +310,13 @@ final class AudioPlayer: ObservableObject {
     private func startEngine() {
         suppressConfigChangeUntil = Date().addingTimeInterval(2.0)
         dbg("startEngine — suppressing config changes for 2s")
+        // Request a large I/O buffer BEFORE starting the engine so AVAudioEngine
+        // configures its internal AUs with the matching mMaxFramesPerSlice.
+        // Setting it after start causes kAudioUnitErr_TooManyFramesToProcess (-10874).
+        if let deviceID = resolvedOutputDeviceID() {
+            let ok = AudioDeviceManager.setBufferFrameSize(2048, forDeviceID: deviceID)
+            dbg("startEngine — setBufferFrameSize(2048) \(ok ? "OK" : "FAILED")")
+        }
         do {
             try engine.start()
             // Reconnect now that the engine is running so the format is derived from
@@ -320,12 +327,6 @@ final class AudioPlayer: ObservableObject {
             outputSampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
             // For nil-format connections, graphSampleRate equals the hardware rate.
             if rate == nil { graphSampleRate = outputSampleRate }
-            // Request a large I/O buffer to reduce HALC overload risk when
-            // Pro Tools Aux I/O is sharing the same CoreAudio device.
-            if let deviceID = resolvedOutputDeviceID() {
-                let ok = AudioDeviceManager.setBufferFrameSize(2048, forDeviceID: deviceID)
-                dbg("startEngine — setBufferFrameSize(2048) \(ok ? "OK" : "FAILED")")
-            }
             dbg("startEngine — OK, sr=\(outputSampleRate)")
         } catch {
             dbg("startEngine — FAILED: \(error)")
