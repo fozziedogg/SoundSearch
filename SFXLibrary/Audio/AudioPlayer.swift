@@ -431,7 +431,11 @@ final class AudioPlayer: ObservableObject {
 
     private var _nilPlayerTimeCount = 0
 
+    /// Runs on the background timer queue. AVAudioEngine reads happen here, at the moment
+    /// the timer fires, so that coalesced main-queue dispatches each carry a distinct
+    /// pre-computed position rather than all reading the same current playerTime value.
     private func updatePosition() {
+        // Minor data races on @Published properties are acceptable for a display update.
         guard isPlaying else { return }
         guard engine.isRunning else {
             dbg("updatePosition — engine stopped while isPlaying=true")
@@ -440,39 +444,41 @@ final class AudioPlayer: ObservableObject {
         guard let file = audioFile, file.length > 0 else { return }
         guard let nodeTime = playerNode.lastRenderTime else {
             _nilPlayerTimeCount += 1
-            if _nilPlayerTimeCount == 1 || _nilPlayerTimeCount % 24 == 0 {
+            if _nilPlayerTimeCount == 1 || _nilPlayerTimeCount % 60 == 0 {
                 dbg("updatePosition — lastRenderTime nil (x\(_nilPlayerTimeCount))")
             }
             return
         }
         guard let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
             _nilPlayerTimeCount += 1
-            if _nilPlayerTimeCount == 1 || _nilPlayerTimeCount % 24 == 0 {
+            if _nilPlayerTimeCount == 1 || _nilPlayerTimeCount % 60 == 0 {
                 dbg("updatePosition — playerTime nil (x\(_nilPlayerTimeCount)), nodeRunning=\(playerNode.isPlaying)")
             }
             return
         }
         _nilPlayerTimeCount = 0
 
-        // playerTime.sampleTime is in the player node's connection rate (graphSampleRate).
-        // seekFrame and file.length are in the file's native sample rate.
-        // Scale so all three are in the same unit.
-        // Use graphSampleRate (captured at engine start) rather than playerTime.sampleRate,
-        // which can transiently report the wrong value during HAL reconfiguration.
-        let connectionRate = graphSampleRate > 0 ? graphSampleRate : playerTime.sampleRate
-        let rateRatio = file.fileFormat.sampleRate / connectionRate
-        let scaledSampleTime = AVAudioFramePosition(Double(playerTime.sampleTime) * rateRatio)
+        // Snapshot main-thread values — read here on background so the result is
+        // timestamped at fire time, not at dispatch-execution time.
+        let seek       = seekFrame
+        let graphRate  = graphSampleRate
+        let currentPos = playPosition
 
-        let frame    = seekFrame + scaledSampleTime
-        let newPos   = min(max(Double(frame) / Double(file.length), 0), 1)
+        let connectionRate = graphRate > 0 ? graphRate : playerTime.sampleRate
+        let rateRatio      = file.fileFormat.sampleRate / connectionRate
+        let scaledST       = AVAudioFramePosition(Double(playerTime.sampleTime) * rateRatio)
+        let newPos         = min(max(Double(seek + scaledST) / Double(file.length), 0), 1)
 
-        // Detect a position jump larger than ~0.5s — likely a glitch or engine restart.
-        if abs(newPos - playPosition) > (0.5 / max(duration, 1)) {
-            dbg("POSITION JUMP: \(String(format: "%.3f", playPosition)) → \(String(format: "%.3f", newPos))  (nodeRunning=\(playerNode.isPlaying), sampleTime=\(playerTime.sampleTime), seekFrame=\(seekFrame), rateRatio=\(String(format: "%.4f", file.fileFormat.sampleRate / playerTime.sampleRate)))")
+        if abs(newPos - currentPos) > (0.5 / max(duration, 1)) {
+            dbg("POSITION JUMP: \(String(format: "%.3f", currentPos)) → \(String(format: "%.3f", newPos))  (nodeRunning=\(playerNode.isPlaying), sampleTime=\(playerTime.sampleTime), seekFrame=\(seek), rateRatio=\(String(format: "%.4f", rateRatio)))")
         }
 
-        if abs(newPos - playPosition) > 0.0002 {
-            playPosition = newPos
+        guard abs(newPos - currentPos) > 0.0002 else { return }
+
+        // Only the write goes to main — cheap, so coalesced batches execute quickly.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isPlaying else { return }
+            self.playPosition = newPos
         }
     }
 
