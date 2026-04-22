@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Xcode user data
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# Build artifacts
+DerivedData/
+*.profraw
+*.profdata
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Debug logs (per-session, generated at runtime)
+app/SFXLibrary\ Data/Debug\ Logs/
+
+# Claude Code local settings
+.claude/settings.local.json
