@@ -353,6 +353,14 @@ final class AudioPlayer: ObservableObject {
                 self.consecutiveTransientRestarts += 1
                 SFXAudioLog.write("[SFXAudio] CONFIG CHANGE  startup transient #\(self.consecutiveTransientRestarts) — restarting engine")
                 if self.consecutiveTransientRestarts <= 3 {
+                    // Re-apply the selected output device before restarting — the config
+                    // change may have reset the audio unit's device property, which would
+                    // cause startEngine() to register the overload listener on the wrong
+                    // device (system default instead of e.g. Fireface UCX).
+                    if !self.currentOutputDeviceUID.isEmpty,
+                       let deviceID = AudioDeviceManager.deviceID(forUID: self.currentOutputDeviceUID) {
+                        self.applyOutputDeviceID(deviceID)
+                    }
                     self.startEngine()
                     self.engine.mainMixerNode.outputVolume = self.volume
                     return
@@ -561,6 +569,13 @@ final class AudioPlayer: ObservableObject {
             return
         }
         timerSkipCount = 0
+        // Detect if the player node stopped unexpectedly while we think we're playing.
+        // This can happen due to HAL overloads or CoreAudio-level issues that don't
+        // stop the engine itself — the engine stays running but the node goes silent.
+        if isPlaying && !playerNode.isPlaying {
+            SFXAudioLog.write(String(format: "[SFXAudio] TIMER  playerNode.isPlaying=false while isPlaying=true | overloads=%d",
+                                     halOverloadCount))
+        }
         guard let file = audioFile,
               let nodeTime   = playerNode.lastRenderTime,
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime),
