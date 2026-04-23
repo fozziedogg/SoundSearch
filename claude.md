@@ -1,18 +1,10 @@
----
-name: SFX Library App
-description: Native macOS Swift app for sound effects library management — project context and key decisions
-type: project
----
+# SoundSearch
 
-Matthew is building a personal macOS sound effects library app at `/Users/fozzie/developer/sfxlibrary`.
+Native macOS app for sound effects library management, built for Re-Recording Mixer / Sound Supervisor workflows.
 
 **Stack:** Swift/SwiftUI + AppKit, GRDB.swift (SQLite + FTS5), AVFoundation, FSEvents
 
 **Key features:** BWF/iXML metadata search & edit, live folder watching, waveform display + scrubbing, pitch shifting, drag-to-ProTools with timecode spotting (BEXT TimeReference)
-
-**Status:** Scaffolded and building clean as of 2026-04-08. All 39 Swift files created, GRDB added via SPM.
-
-**Why:** Replaces manual Finder-based workflow for Re-Recording Mixer / Sound Supervisor work.
 
 **Architecture notes:**
 - AppEnvironment must NOT be @MainActor — causes ObservableObject synthesis failure
