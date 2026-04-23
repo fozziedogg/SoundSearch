@@ -15,16 +15,15 @@ struct FileListView: View {
     @FocusState private var searchFocused: Bool
     @State private var showChangesSheet = false
 
-    private var displayedRows: [AudioFileRow] {
-        let files = vm.searchQuery.isEmpty ? env.audioFiles : vm.searchResults
-        return files.map { AudioFileRow(file: $0) }
-    }
-
     private func applySort() {
         sortTask?.cancel()
-        let rows = displayedRows
+        let files = vm.searchQuery.isEmpty ? env.audioFiles : vm.searchResults
         let order = sortOrder
         sortTask = Task {
+            let rows = await Task.detached(priority: .userInitiated) {
+                files.map { AudioFileRow(file: $0) }
+            }.value
+            guard !Task.isCancelled else { return }
             let sorted: [AudioFileRow]
             if order.isEmpty {
                 sorted = rows

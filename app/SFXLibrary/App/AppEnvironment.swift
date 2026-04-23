@@ -641,7 +641,7 @@ final class AppEnvironment {
             urls.forEach { args += [$0] }
             return ("WHERE file_url IN (\(placeholders))", args)
         } else if let filter = folderFilter {
-            return ("WHERE file_url LIKE ?", ["\(filter)/%"])
+            return ("WHERE file_url GLOB ?", ["\(filter)/*"])
         }
         return ("", [])
     }
