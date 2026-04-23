@@ -131,7 +131,14 @@ private struct WindowFrameSaver: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
-            view.window?.setFrameAutosaveName(autosaveName)
+            guard let window = view.window else { return }
+            window.setFrameAutosaveName(autosaveName)
+            // Second pass: SwiftUI may relayout after setFrameAutosaveName fires,
+            // overriding the restored frame. Explicitly re-apply the saved frame
+            // after SwiftUI's layout settles.
+            DispatchQueue.main.async {
+                window.setFrameUsingName(autosaveName)
+            }
         }
         return view
     }

@@ -157,8 +157,13 @@ struct AudioSettingsView: View {
                     Text("1000").tag(1_000)
                     Text("2000").tag(2_000)
                 }
+                Toggle("GRM", isOn: $bEnv.grahamRogersMode)
             } header: {
                 Text("Appearance")
+            } footer: {
+                Text("GRM replaces green/red with teal/orange for red-green colour blindness.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
             }
 
         }
