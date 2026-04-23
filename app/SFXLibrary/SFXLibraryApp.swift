@@ -20,7 +20,7 @@ struct SFXLibraryApp: App {
                 .onAppear {
                     currentDBName = env.currentDatabaseURL.lastPathComponent
                 }
-                .background(WindowFrameSaver(autosaveName: "MainWindow"))
+                .background(WindowFrameSaver())
                 .onChange(of: env.currentDatabaseURL) { _, url in
                     currentDBName = url.lastPathComponent
                 }
@@ -129,21 +129,15 @@ struct SFXLibraryApp: App {
 /// hierarchy yet. The deferred setFrameUsingName re-applies the saved frame
 /// after SwiftUI's own layout pass, which otherwise overrides the restored position.
 private struct WindowFrameSaver: NSViewRepresentable {
-    let autosaveName: String
-
-    func makeNSView(context: Context) -> FrameSaverView {
-        FrameSaverView(autosaveName: autosaveName)
-    }
-
+    func makeNSView(context: Context) -> FrameSaverView { FrameSaverView() }
     func updateNSView(_ nsView: FrameSaverView, context: Context) {}
 }
 
 final class FrameSaverView: NSView {
-    private let autosaveName: String
+    private static let frameKey = "MainWindowFrame"
     private var applied = false
 
-    init(autosaveName: String) {
-        self.autosaveName = autosaveName
+    init() {
         super.init(frame: .zero)
     }
 
@@ -151,24 +145,36 @@ final class FrameSaverView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        SFXAudioLog.write("[Window] viewDidMoveToWindow — window=\(self.window != nil ? "yes" : "NIL") applied=\(applied)")
         guard let window, !applied else { return }
         applied = true
 
-        let defaultsKey = "NSWindow Frame \(autosaveName)"
-        let saved = UserDefaults.standard.string(forKey: defaultsKey)
-        SFXAudioLog.write("[Window] saved frame in defaults: \(saved ?? "NONE")")
-        SFXAudioLog.write("[Window] window frame before autosave: \(NSStringFromRect(window.frame))")
-        SFXAudioLog.write("[Window] window screen: \(window.screen?.localizedName ?? "nil")")
+        // Observe move/resize to manually persist the frame.
+        // setFrameAutosaveName does not save in this SwiftUI context.
+        NotificationCenter.default.addObserver(self, selector: #selector(saveFrame(_:)),
+            name: NSWindow.didMoveNotification,   object: window)
+        NotificationCenter.default.addObserver(self, selector: #selector(saveFrame(_:)),
+            name: NSWindow.didResizeNotification, object: window)
 
-        window.setFrameAutosaveName(autosaveName)
-        SFXAudioLog.write("[Window] setFrameAutosaveName done — frame now: \(NSStringFromRect(window.frame))")
+        let saved = UserDefaults.standard.string(forKey: Self.frameKey)
+        SFXAudioLog.write("[Window] viewDidMoveToWindow | saved=\(saved ?? "NONE") | current=\(NSStringFromRect(window.frame)) | screen=\(window.screen?.localizedName ?? "nil")")
 
-        DispatchQueue.main.async { [weak window, autosaveName] in
-            SFXAudioLog.write("[Window] deferred setFrameUsingName — frame before: \(NSStringFromRect(window?.frame ?? .zero))")
-            window?.setFrameUsingName(autosaveName)
-            SFXAudioLog.write("[Window] deferred setFrameUsingName done — frame after: \(NSStringFromRect(window?.frame ?? .zero))")
-            SFXAudioLog.write("[Window] window screen after: \(window?.screen?.localizedName ?? "nil")")
+        guard let saved, !saved.isEmpty else { return }
+        let frame = NSRectFromString(saved)
+        guard frame != .zero else { return }
+
+        // Deferred: SwiftUI repositions the window after viewDidMoveToWindow.
+        // Apply saved frame on the next run loop to win that race.
+        DispatchQueue.main.async { [weak window] in
+            SFXAudioLog.write("[Window] restoring frame=\(saved) | before=\(NSStringFromRect(window?.frame ?? .zero))")
+            window?.setFrame(frame, display: true, animate: false)
+            SFXAudioLog.write("[Window] after restore=\(NSStringFromRect(window?.frame ?? .zero)) | screen=\(window?.screen?.localizedName ?? "nil")")
         }
+    }
+
+    @objc private func saveFrame(_ note: Notification) {
+        guard let window = note.object as? NSWindow else { return }
+        let str = NSStringFromRect(window.frame)
+        UserDefaults.standard.set(str, forKey: Self.frameKey)
+        SFXAudioLog.write("[Window] saved frame=\(str) | screen=\(window.screen?.localizedName ?? "nil")")
     }
 }
