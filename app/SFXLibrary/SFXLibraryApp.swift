@@ -151,14 +151,24 @@ final class FrameSaverView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        SFXAudioLog.write("[Window] viewDidMoveToWindow — window=\(self.window != nil ? "yes" : "NIL") applied=\(applied)")
         guard let window, !applied else { return }
         applied = true
-        // Register autosave — AppKit will now save on every move/resize.
+
+        let defaultsKey = "NSWindow Frame \(autosaveName)"
+        let saved = UserDefaults.standard.string(forKey: defaultsKey)
+        SFXAudioLog.write("[Window] saved frame in defaults: \(saved ?? "NONE")")
+        SFXAudioLog.write("[Window] window frame before autosave: \(NSStringFromRect(window.frame))")
+        SFXAudioLog.write("[Window] window screen: \(window.screen?.localizedName ?? "nil")")
+
         window.setFrameAutosaveName(autosaveName)
-        // Deferred re-apply: SwiftUI lays out the window after this callback,
-        // which can reposition it. Running on the next run loop overrides that.
+        SFXAudioLog.write("[Window] setFrameAutosaveName done — frame now: \(NSStringFromRect(window.frame))")
+
         DispatchQueue.main.async { [weak window, autosaveName] in
+            SFXAudioLog.write("[Window] deferred setFrameUsingName — frame before: \(NSStringFromRect(window?.frame ?? .zero))")
             window?.setFrameUsingName(autosaveName)
+            SFXAudioLog.write("[Window] deferred setFrameUsingName done — frame after: \(NSStringFromRect(window?.frame ?? .zero))")
+            SFXAudioLog.write("[Window] window screen after: \(window?.screen?.localizedName ?? "nil")")
         }
     }
 }
