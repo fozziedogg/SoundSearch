@@ -19,10 +19,8 @@ struct SFXLibraryApp: App {
                 .frame(minWidth: 960, minHeight: 640)
                 .onAppear {
                     currentDBName = env.currentDatabaseURL.lastPathComponent
-                    // Called here (not in applicationDidFinishLaunching) because the
-                    // SwiftUI window doesn't exist until after the scene is rendered.
-                    NSApp.mainWindow?.setFrameAutosaveName("MainWindow")
                 }
+                .background(WindowFrameSaver(autosaveName: "MainWindow"))
                 .onChange(of: env.currentDatabaseURL) { _, url in
                     currentDBName = url.lastPathComponent
                 }
@@ -121,4 +119,22 @@ struct SFXLibraryApp: App {
             }
         }
     }
+}
+
+// MARK: - Window frame persistence
+
+/// Injects itself into the view hierarchy to reliably obtain the NSWindow reference,
+/// then sets the autosave name so AppKit persists frame + screen across launches.
+private struct WindowFrameSaver: NSViewRepresentable {
+    let autosaveName: String
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            view.window?.setFrameAutosaveName(autosaveName)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
