@@ -123,25 +123,42 @@ struct SFXLibraryApp: App {
 
 // MARK: - Window frame persistence
 
-/// Injects itself into the view hierarchy to reliably obtain the NSWindow reference,
-/// then sets the autosave name so AppKit persists frame + screen across launches.
+/// Wraps a custom NSView subclass that overrides viewDidMoveToWindow().
+/// AppKit guarantees self.window is non-nil inside that callback, unlike
+/// DispatchQueue.main.async approaches where the view may not be in the
+/// hierarchy yet. The deferred setFrameUsingName re-applies the saved frame
+/// after SwiftUI's own layout pass, which otherwise overrides the restored position.
 private struct WindowFrameSaver: NSViewRepresentable {
     let autosaveName: String
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            window.setFrameAutosaveName(autosaveName)
-            // Second pass: SwiftUI may relayout after setFrameAutosaveName fires,
-            // overriding the restored frame. Explicitly re-apply the saved frame
-            // after SwiftUI's layout settles.
-            DispatchQueue.main.async {
-                window.setFrameUsingName(autosaveName)
-            }
-        }
-        return view
+    func makeNSView(context: Context) -> FrameSaverView {
+        FrameSaverView(autosaveName: autosaveName)
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: FrameSaverView, context: Context) {}
+}
+
+final class FrameSaverView: NSView {
+    private let autosaveName: String
+    private var applied = false
+
+    init(autosaveName: String) {
+        self.autosaveName = autosaveName
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window, !applied else { return }
+        applied = true
+        // Register autosave — AppKit will now save on every move/resize.
+        window.setFrameAutosaveName(autosaveName)
+        // Deferred re-apply: SwiftUI lays out the window after this callback,
+        // which can reposition it. Running on the next run loop overrides that.
+        DispatchQueue.main.async { [weak window, autosaveName] in
+            window?.setFrameUsingName(autosaveName)
+        }
+    }
 }
