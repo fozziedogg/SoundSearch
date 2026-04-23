@@ -156,8 +156,6 @@ final class FrameSaverView: NSView {
             name: NSWindow.didResizeNotification, object: window)
 
         let saved = UserDefaults.standard.string(forKey: Self.frameKey)
-        SFXAudioLog.write("[Window] viewDidMoveToWindow | saved=\(saved ?? "NONE") | current=\(NSStringFromRect(window.frame)) | screen=\(window.screen?.localizedName ?? "nil")")
-
         guard let saved, !saved.isEmpty else { return }
         let frame = NSRectFromString(saved)
         guard frame != .zero else { return }
@@ -165,16 +163,12 @@ final class FrameSaverView: NSView {
         // Deferred: SwiftUI repositions the window after viewDidMoveToWindow.
         // Apply saved frame on the next run loop to win that race.
         DispatchQueue.main.async { [weak window] in
-            SFXAudioLog.write("[Window] restoring frame=\(saved) | before=\(NSStringFromRect(window?.frame ?? .zero))")
             window?.setFrame(frame, display: true, animate: false)
-            SFXAudioLog.write("[Window] after restore=\(NSStringFromRect(window?.frame ?? .zero)) | screen=\(window?.screen?.localizedName ?? "nil")")
         }
     }
 
     @objc private func saveFrame(_ note: Notification) {
         guard let window = note.object as? NSWindow else { return }
-        let str = NSStringFromRect(window.frame)
-        UserDefaults.standard.set(str, forKey: Self.frameKey)
-        SFXAudioLog.write("[Window] saved frame=\(str) | screen=\(window.screen?.localizedName ?? "nil")")
+        UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: Self.frameKey)
     }
 }
