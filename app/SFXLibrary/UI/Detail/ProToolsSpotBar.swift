@@ -73,12 +73,10 @@ struct ProToolsSpotBar: View {
                           || $0.localizedName    == "Pro Tools" }?
                     .activate(options: .activateIgnoringOtherApps)
             }
-            // Do NOT force a reconnect here. Rebuilding the engine while the Fireface
-            // (or any USB audio interface) is still hot from PT's import activity
-            // triggers a startup transient on a stressed device, leaving the audio path
-            // in a bad state. If PT's spot changed the CoreAudio device config, the
-            // AVAudioEngineConfigurationChange handler already rebuilt the engine cleanly.
-            // If it didn't change, the engine is fine as-is.
+            // No engine rebuild here — rebuilding while PT's audio device is still hot
+            // from the import causes a startup transient on a stressed device and leaves
+            // the audio path glitchy. The AVAudioEngineConfigurationChange handler
+            // already handles any real device reconfiguration PT triggers.
         } catch {
             env.spotFeedback = .failure(error.localizedDescription)
         }

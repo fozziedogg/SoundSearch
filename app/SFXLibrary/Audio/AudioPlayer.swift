@@ -153,21 +153,11 @@ final class AudioPlayer: ObservableObject {
         addConfigChangeObserver()
     }
 
-    /// Restarts the engine if it has stopped without recreating it.
-    /// Use for routine recovery (e.g. engine idled); forceReconnect for post-spot cleanup.
+    /// Restarts the engine if it has stopped without recreating it (e.g. engine idled).
     func recoverEngineIfNeeded() {
         guard !engine.isRunning else { return }
         startEngine()
         engine.mainMixerNode.outputVolume = volume
-    }
-
-    /// Fully recreates the AVAudioEngine after a spot operation.
-    /// The entire engine (including mainMixerNode → outputNode SRC chain) is
-    /// replaced so no dirty state from the PT round-trip survives.
-    func forceReconnect() {
-        SFXAudioLog.write("[SFXAudio] RECONNECT  forced (post-spot)")
-        rebuildEngine()
-        refreshCurrentFile()
     }
 
     // MARK: - Output device
@@ -570,13 +560,6 @@ final class AudioPlayer: ObservableObject {
             return
         }
         timerSkipCount = 0
-        // Detect if the player node stopped unexpectedly while we think we're playing.
-        // This can happen due to HAL overloads or CoreAudio-level issues that don't
-        // stop the engine itself — the engine stays running but the node goes silent.
-        if isPlaying && !playerNode.isPlaying {
-            SFXAudioLog.write(String(format: "[SFXAudio] TIMER  playerNode.isPlaying=false while isPlaying=true | overloads=%d",
-                                     halOverloadCount))
-        }
         guard let file = audioFile,
               let nodeTime   = playerNode.lastRenderTime,
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime),
