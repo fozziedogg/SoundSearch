@@ -73,12 +73,12 @@ struct ProToolsSpotBar: View {
                           || $0.localizedName    == "Pro Tools" }?
                     .activate(options: .activateIgnoringOtherApps)
             }
-            // Pro Tools may change the CoreAudio device sample rate when it receives audio,
-            // killing AVAudioEngine. Always force a full graph reconnect — even if the engine
-            // is still running, the playerNode's internal SRC converter is left in a dirty
-            // state after stop() + PTSL round-trip and will glitch on the next play.
-            try? await Task.sleep(for: .milliseconds(600))
-            player.forceReconnect()
+            // Do NOT force a reconnect here. Rebuilding the engine while the Fireface
+            // (or any USB audio interface) is still hot from PT's import activity
+            // triggers a startup transient on a stressed device, leaving the audio path
+            // in a bad state. If PT's spot changed the CoreAudio device config, the
+            // AVAudioEngineConfigurationChange handler already rebuilt the engine cleanly.
+            // If it didn't change, the engine is fine as-is.
         } catch {
             env.spotFeedback = .failure(error.localizedDescription)
         }
