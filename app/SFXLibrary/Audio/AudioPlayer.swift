@@ -120,9 +120,12 @@ final class AudioPlayer: ObservableObject {
     private var halOverloadCount = 0
     // Device ID we currently have the overload listener registered on.
     private var overloadListenerDeviceID: AudioDeviceID = AudioDeviceID(kAudioDeviceUnknown)
-    // Incremented on every rebuildEngine() call so stale 500ms addConfigChangeObserver
-    // timers from earlier rebuild cycles do nothing on the current engine.
-    private var rebuildGeneration = 0
+    // Timestamp of the most recent successful engine start, used to identify
+    // spurious startup config changes and suppress them without a rebuild.
+    private var lastEngineStartTime: Date = .distantPast
+    // Counts how many consecutive startup-transient restarts have occurred.
+    // Caps at 3 to prevent an infinite restart loop if something is truly wrong.
+    private var consecutiveTransientRestarts = 0
 
     // Debounces AVAudioEngineConfigurationChange — rapid-fire notifications
     // (e.g. Bluetooth glitching, PT Aux I/O reconfiguring) only trigger one restart.
@@ -294,23 +297,18 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
-    /// Recreates the engine, starts it, then re-registers the config change observer.
-    /// The observer is added 500ms AFTER startEngine() — starting the engine disturbs
-    /// the HAL and fires AVAudioEngineConfigurationChange ~150ms later. Registering
-    /// immediately would re-catch that notification and trigger an infinite rebuild loop.
-    /// The generation check ensures stale timers from earlier rebuild cycles do nothing
-    /// on the current engine, preventing the loop where each cycle's timer prematurely
-    /// registers the observer on the next cycle's engine.
+    /// Recreates the engine, starts it, and immediately registers the config change observer.
+    /// AVAudioEngine fires a spurious AVAudioEngineConfigurationChange ~150ms after
+    /// startEngine() (HAL disturbance from the restart). The observer handles this as a
+    /// startup transient — it simply restarts the engine rather than triggering another
+    /// full rebuild, breaking the infinite rebuild loop that the old 500ms delay was
+    /// designed to prevent.
     private func rebuildEngine() {
-        rebuildGeneration += 1
-        let gen = rebuildGeneration
+        consecutiveTransientRestarts = 0
         reconnectGraph()
         startEngine()
         engine.mainMixerNode.outputVolume = volume
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self, self.rebuildGeneration == gen else { return }
-            self.addConfigChangeObserver()
-        }
+        addConfigChangeObserver()
     }
 
     /// Replaces the AVAudioEngine and playerNode. Does NOT start the engine or
@@ -345,6 +343,24 @@ final class AudioPlayer: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
+
+            // AVAudioEngine fires a spurious config-change notification ~150ms after
+            // startEngine() due to HAL negotiation, then stops itself. No real format
+            // change has occurred — just restart the engine and return. Cap at 3
+            // consecutive transient restarts to prevent an infinite loop if something
+            // is genuinely wrong.
+            if Date().timeIntervalSince(self.lastEngineStartTime) < 0.3 {
+                self.consecutiveTransientRestarts += 1
+                SFXAudioLog.write("[SFXAudio] CONFIG CHANGE  startup transient #\(self.consecutiveTransientRestarts) — restarting engine")
+                if self.consecutiveTransientRestarts <= 3 {
+                    self.startEngine()
+                    self.engine.mainMixerNode.outputVolume = self.volume
+                    return
+                }
+                // Too many consecutive transients — fall through to full rebuild.
+                self.consecutiveTransientRestarts = 0
+            }
+
             self.configChangeCount += 1
             SFXAudioLog.write(String(format: "[SFXAudio] CONFIG CHANGE #%d | wasPlaying=%@ | rate=%.0fHz | debounce %@",
                          self.configChangeCount,
@@ -389,6 +405,7 @@ final class AudioPlayer: ObservableObject {
     private func startEngine() {
         do {
             try engine.start()
+            lastEngineStartTime = Date()
             let prevRate     = outputSampleRate
             outputSampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
             let rateChange   = prevRate > 0 && prevRate != outputSampleRate
