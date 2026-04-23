@@ -113,7 +113,7 @@ struct FileListView: View {
                     .padding(.vertical, 5)
                     .background(Color.accentColor.opacity(0.07))
                 } else {
-                    let capped = env.totalAudioFileCount > AppEnvironment.browseLimit
+                    let capped = env.totalAudioFileCount > env.browseLimit
                     HStack(spacing: 4) {
                         Text(capped
                              ? "Showing \(env.audioFiles.count) of \(env.totalAudioFileCount) records — search to find others"

@@ -19,6 +19,9 @@ struct SFXLibraryApp: App {
                 .frame(minWidth: 960, minHeight: 640)
                 .onAppear {
                     currentDBName = env.currentDatabaseURL.lastPathComponent
+                    // Called here (not in applicationDidFinishLaunching) because the
+                    // SwiftUI window doesn't exist until after the scene is rendered.
+                    NSApp.mainWindow?.setFrameAutosaveName("MainWindow")
                 }
                 .onChange(of: env.currentDatabaseURL) { _, url in
                     currentDBName = url.lastPathComponent
@@ -57,6 +60,26 @@ struct SFXLibraryApp: App {
         }
         .commands {
             CommandGroup(replacing: .newItem) { }
+
+            CommandMenu("Appearance") {
+                Picker("", selection: Binding(
+                    get: { env.appearanceMode },
+                    set: { env.appearanceMode = $0 }
+                )) {
+                    Text("Dark").tag("dark")
+                    Text("Warm").tag("warm")
+                    Text("Light").tag("light")
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+
+                Divider()
+
+                Toggle("GRM", isOn: Binding(
+                    get: { env.grahamRogersMode },
+                    set: { env.grahamRogersMode = $0 }
+                ))
+            }
 
             CommandMenu("Library") {
                 // Current database indicator

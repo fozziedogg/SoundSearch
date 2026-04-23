@@ -25,7 +25,16 @@ final class AppEnvironment {
     var totalAudioFileCount: Int = 0
 
     /// Maximum rows loaded into the browse list. Search results are separate and always <= 200.
-    static let browseLimit = 1_000
+    var browseLimit: Int = {
+        let v = UserDefaults.standard.integer(forKey: "browseLimit")
+        return [200, 500, 1_000, 2_000].contains(v) ? v : 1_000
+    }() {
+        didSet {
+            guard browseLimit != oldValue else { return }
+            UserDefaults.standard.set(browseLimit, forKey: "browseLimit")
+            startFilesObservation(db: db)
+        }
+    }
 
     /// When set, the browse list and search are limited to files under this path prefix.
     var folderFilter: String? = nil {
@@ -652,7 +661,7 @@ final class AppEnvironment {
         browseTask?.cancel()
 
         let gen   = observationGeneration
-        let limit = AppEnvironment.browseLimit
+        let limit = browseLimit
         let (whereClause, queryArgs) = buildBrowseWhereClause()
 
         let sql = """

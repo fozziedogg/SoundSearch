@@ -5,7 +5,7 @@ extension DatabasePool {
     /// The directory where the database and its WAL files live.
     static var databaseDirectory: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return docs.appendingPathComponent("SFXLibrary_database", isDirectory: true)
+        return docs.appendingPathComponent("SoundSearchDB", isDirectory: true)
     }
 
     /// The canonical URL of the SQLite database file.
@@ -225,7 +225,7 @@ extension DatabasePool {
         return pool
     }
 
-    /// Convenience: opens the default library database in ~/Documents/SFXLibrary_database/.
+    /// Convenience: opens the default library database in ~/Documents/SoundSearchDB/.
     static func setupShared() throws -> DatabasePool {
         try setup(at: databaseURL)
     }

@@ -151,13 +151,14 @@ struct AudioSettingsView: View {
                     Text("Warm").tag("warm")
                     Text("Light").tag("light")
                 }
-                Toggle("Graham Rogers Mode", isOn: $bEnv.grahamRogersMode)
+                Picker("Max records", selection: $bEnv.browseLimit) {
+                    Text("200").tag(200)
+                    Text("500").tag(500)
+                    Text("1000").tag(1_000)
+                    Text("2000").tag(2_000)
+                }
             } header: {
-                Text("Accessibility")
-            } footer: {
-                Text("Graham Rogers Mode replaces green/red with teal/orange throughout the interface, making status indicators distinguishable for red-green colour blindness.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                Text("Appearance")
             }
 
         }

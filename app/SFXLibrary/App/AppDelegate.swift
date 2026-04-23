@@ -4,9 +4,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
 
-        // Persist window frame (position, size, monitor) across launches.
-        NSApp.windows.first?.setFrameAutosaveName("MainWindow")
-
         // Clean up any leftover ProTools spot temp files from previous sessions
         let spotDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("SFXLibrarySpot")
