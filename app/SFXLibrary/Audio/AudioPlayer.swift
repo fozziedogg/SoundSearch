@@ -149,6 +149,7 @@ final class AudioPlayer: ObservableObject {
         }
 
         startEngine()
+        engine.mainMixerNode.outputVolume = volume
         addConfigChangeObserver()
     }
 
