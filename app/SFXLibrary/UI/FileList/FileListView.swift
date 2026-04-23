@@ -10,6 +10,8 @@ struct FileListView: View {
     @State private var selectedID: Int64? = nil
     @State private var columnCustomization = TableColumnCustomization<AudioFileRow>()
     @State private var sortOrder: [KeyPathComparator<AudioFileRow>] = []
+    @State private var sortedRows: [AudioFileRow] = []
+    @State private var sortTask: Task<Void, Never>? = nil
     @FocusState private var searchFocused: Bool
     @State private var showChangesSheet = false
 
@@ -18,8 +20,22 @@ struct FileListView: View {
         return files.map { AudioFileRow(file: $0) }
     }
 
-    private var sortedRows: [AudioFileRow] {
-        sortOrder.isEmpty ? displayedRows : displayedRows.sorted(using: sortOrder)
+    private func applySort() {
+        sortTask?.cancel()
+        let rows = displayedRows
+        let order = sortOrder
+        sortTask = Task {
+            let sorted: [AudioFileRow]
+            if order.isEmpty {
+                sorted = rows
+            } else {
+                sorted = await Task.detached(priority: .userInitiated) {
+                    rows.sorted(using: order)
+                }.value
+            }
+            guard !Task.isCancelled else { return }
+            sortedRows = sorted
+        }
     }
 
     var body: some View {
@@ -122,6 +138,11 @@ struct FileListView: View {
                     .foregroundColor(.secondary)
             }
         }
+        .onAppear { applySort() }
+        .onChange(of: sortOrder)              { _, _ in applySort() }
+        .onChange(of: env.audioFiles.count)   { _, _ in applySort() }
+        .onChange(of: vm.searchResults.count) { _, _ in applySort() }
+        .onChange(of: vm.searchQuery)         { _, _ in applySort() }
         .onChange(of: selectedID) { _, newID in
             guard let id = newID else { selectedFile = nil; return }
             selectedFile = env.audioFiles.first { $0.id == id }
