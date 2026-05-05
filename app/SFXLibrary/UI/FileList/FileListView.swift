@@ -137,7 +137,18 @@ struct FileListView: View {
                     .foregroundColor(.secondary)
             }
         }
-        .onAppear { applySort() }
+        .onAppear {
+            if let data = UserDefaults.standard.data(forKey: "fileListColumnCustomization"),
+               let decoded = try? JSONDecoder().decode(TableColumnCustomization<AudioFileRow>.self, from: data) {
+                columnCustomization = decoded
+            }
+            applySort()
+        }
+        .onChange(of: columnCustomization) { _, new in
+            if let data = try? JSONEncoder().encode(new) {
+                UserDefaults.standard.set(data, forKey: "fileListColumnCustomization")
+            }
+        }
         .onChange(of: sortOrder)              { _, _ in applySort() }
         .onChange(of: env.audioFiles.count)   { _, _ in applySort() }
         .onChange(of: vm.searchResults.count) { _, _ in applySort() }
