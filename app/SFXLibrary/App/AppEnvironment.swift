@@ -16,7 +16,6 @@ final class AppEnvironment {
     var folderScanner: FolderScanner
     let audioPlayer: AudioPlayer
     var searchRepository: SearchRepository
-    let ptslClient = PTSLClient.shared
 
     /// Reactively updated list of audio files (capped at browseLimit for UI safety).
     var audioFiles: [AudioFile] = []

@@ -9,11 +9,57 @@ struct FileListView: View {
 
     @State private var selectedID: Int64? = nil
     @State private var columnCustomization = TableColumnCustomization<AudioFileRow>()
-    @State private var sortOrder: [KeyPathComparator<AudioFileRow>] = []
+    @State private var sortOrder: [AudioFileSort] = [AudioFileSort(field: .name)]
     @State private var sortedRows: [AudioFileRow] = []
     @State private var sortTask: Task<Void, Never>? = nil
     @FocusState private var searchFocused: Bool
     @State private var showChangesSheet = false
+
+    // Active metadata profile drives the dynamic columns.
+    @AppStorage(MetadataProfileKeys.profiles) private var profilesJSON: String = ""
+    @AppStorage(MetadataProfileKeys.activeID) private var activeProfileID: String = ""
+
+    private var activeProfile: MetadataProfile {
+        MetadataProfileStore.activeProfile(profilesJSON: profilesJSON, activeID: activeProfileID)
+    }
+
+    private var allProfiles: [MetadataProfile] {
+        MetadataProfileStore.loaded(from: profilesJSON).profiles
+    }
+
+    private var profileBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "tablecells")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+            Menu {
+                ForEach(allProfiles) { profile in
+                    Button {
+                        activeProfileID = profile.id.uuidString
+                    } label: {
+                        if profile.id.uuidString == activeProfileID {
+                            Label(profile.name, systemImage: "checkmark")
+                        } else {
+                            Text(profile.name)
+                        }
+                    }
+                }
+                Divider()
+                SettingsLink { Text("Manage Profiles…") }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(activeProfile.name).font(.system(size: 11, weight: .medium))
+                    Image(systemName: "chevron.down").font(.system(size: 8))
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(.bar)
+    }
 
     private func applySort() {
         sortTask?.cancel()
@@ -42,8 +88,18 @@ struct FileListView: View {
               selection: $selectedID,
               sortOrder: $sortOrder,
               columnCustomization: $columnCustomization) {
-            columnsA
-            columnsB
+            fixedColumns
+            TableColumnForEach(activeProfile.fields) { key in
+                TableColumn(key.label, sortUsing: AudioFileSort(field: .bwf(key))) { row in
+                    let v = row.file.displayValue(for: key)
+                    Text(v ?? "—")
+                        .font(.system(size: 11))
+                        .foregroundColor(v != nil ? .secondary : Color.secondary.opacity(0.4))
+                        .lineLimit(1)
+                }
+                .width(min: 50, ideal: 110)
+                .customizationID(key.rawValue)
+            }
         } rows: {
             ForEach(sortedRows) { row in
                 TableRow(row)
@@ -126,6 +182,7 @@ struct FileListView: View {
                     .padding(.vertical, 4)
                     .background(capped ? Color.yellow.opacity(0.08) : Color.clear)
                 }
+                profileBar
                 SearchBar(text: $vm.searchQuery, scope: $vm.searchScope, isFocused: $searchFocused)
                     .padding(8)
                     .background(.bar)
@@ -187,88 +244,39 @@ struct FileListView: View {
         }
     }
 
-    // MARK: - Column group A  (name, description, duration, SR, bit, ch, format)
+    // MARK: - Fixed columns (technical identity — always shown)
 
-    @TableColumnBuilder<AudioFileRow, KeyPathComparator<AudioFileRow>>
-    private var columnsA: some TableColumnContent<AudioFileRow, KeyPathComparator<AudioFileRow>> {
-        TableColumn("Name", value: \.displayName) { row in
+    @TableColumnBuilder<AudioFileRow, AudioFileSort>
+    private var fixedColumns: some TableColumnContent<AudioFileRow, AudioFileSort> {
+        TableColumn("Name", sortUsing: AudioFileSort(field: .name)) { row in
             Text(row.displayName).font(.system(size: 12)).lineLimit(1)
         }
         .customizationID("name")
 
-        TableColumn("Description", value: \.file.bwfDescription) { row in
-            Text(row.file.bwfDescription)
-                .font(.system(size: 12)).foregroundColor(.secondary).lineLimit(1)
-        }
-        .customizationID("description")
-
-        TableColumn("Dur", value: \.durationSort) { row in
+        TableColumn("Dur", sortUsing: AudioFileSort(field: .duration)) { row in
             mono11(row.file.duration.map { formatDuration($0) } ?? "—")
         }
         .width(min: 40, ideal: 46).customizationID("duration")
 
-        TableColumn("SR", value: \.sampleRateSort) { row in
+        TableColumn("SR", sortUsing: AudioFileSort(field: .sampleRate)) { row in
             mono11(row.file.sampleRateLabel)
         }
         .width(min: 34, ideal: 44).customizationID("sampleRate")
 
-        TableColumn("Bit", value: \.bitDepthSort) { row in
+        TableColumn("Bit", sortUsing: AudioFileSort(field: .bitDepth)) { row in
             mono11(row.file.bitDepthLabel)
         }
         .width(min: 26, ideal: 34).customizationID("bitDepth")
 
-        TableColumn("Ch", value: \.channelSort) { row in
+        TableColumn("Ch", sortUsing: AudioFileSort(field: .channels)) { row in
             label11(row.file.channelLabel)
         }
         .width(min: 44, ideal: 52).customizationID("channels")
 
-        TableColumn("Format", value: \.file.format) { row in
+        TableColumn("Format", sortUsing: AudioFileSort(field: .format)) { row in
             label11(row.file.format)
         }
         .width(min: 36, ideal: 44).customizationID("format")
-    }
-
-    // MARK: - Column group B  (date, tape, UCS cat, UCS sub, note, library)
-
-    @TableColumnBuilder<AudioFileRow, KeyPathComparator<AudioFileRow>>
-    private var columnsB: some TableColumnContent<AudioFileRow, KeyPathComparator<AudioFileRow>> {
-        TableColumn("Date", value: \.file.originationDate) { row in
-            mono11(row.file.originationDate.isEmpty ? "—" : row.file.originationDate)
-        }
-        .width(min: 68, ideal: 82).customizationID("originationDate")
-
-        TableColumn("Tape", value: \.file.tapeName) { row in
-            label11(row.file.tapeName.isEmpty ? "—" : row.file.tapeName)
-        }
-        .width(min: 40, ideal: 70).customizationID("tapeName")
-
-        TableColumn("UCS Cat", value: \.file.ucsCategory) { row in
-            label11(row.file.ucsCategory.isEmpty ? "—" : row.file.ucsCategory)
-        }
-        .width(min: 50, ideal: 90).customizationID("ucsCategory")
-
-        TableColumn("UCS Sub", value: \.file.ucsSubCategory) { row in
-            label11(row.file.ucsSubCategory.isEmpty ? "—" : row.file.ucsSubCategory)
-        }
-        .width(min: 50, ideal: 90).customizationID("ucsSubCategory")
-
-        TableColumn("Note", value: \.file.ixmlNote) { row in
-            label11(row.file.ixmlNote.isEmpty ? "—" : row.file.ixmlNote)
-        }
-        .width(min: 40, ideal: 80).customizationID("ixmlNote")
-
-        TableColumn("Library", value: \.libraryName) { row in
-            label11(row.libraryName)
-        }
-        .width(min: 60, ideal: 90).customizationID("library")
-
-        TableColumn("Filename", value: \.file.filename) { row in
-            Text(row.file.filename)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-        }
-        .customizationID("filename")
     }
 
     // MARK: - Helpers
@@ -292,6 +300,50 @@ struct FileListView: View {
         let m     = total / 60
         let sec   = total % 60
         return String(format: "%d:%02d", m, sec)
+    }
+}
+
+// MARK: - Unified sort comparator
+//
+// One comparator type for the whole Table so fixed (technical) columns and
+// dynamic profile (metadata) columns can share a single `sortOrder` binding.
+
+struct AudioFileSort: SortComparator, Hashable {
+    enum Field: Hashable {
+        case name, duration, sampleRate, bitDepth, channels, format
+        case bwf(BWFFieldKey)
+    }
+
+    var field: Field
+    var order: SortOrder = .forward
+
+    func compare(_ a: AudioFileRow, _ b: AudioFileRow) -> ComparisonResult {
+        let result: ComparisonResult
+        switch field {
+        case .name:       result = str(a.displayName, b.displayName)
+        case .format:     result = str(a.file.format, b.file.format)
+        case .duration:   result = num(a.durationSort, b.durationSort)
+        case .sampleRate: result = num(Double(a.sampleRateSort), Double(b.sampleRateSort))
+        case .bitDepth:   result = num(Double(a.bitDepthSort), Double(b.bitDepthSort))
+        case .channels:   result = num(Double(a.channelSort), Double(b.channelSort))
+        case .bwf(let k): result = str(a.file.displayValue(for: k) ?? "", b.file.displayValue(for: k) ?? "")
+        }
+        switch order {
+        case .forward:  return result
+        case .reverse:
+            switch result {
+            case .orderedAscending:  return .orderedDescending
+            case .orderedDescending: return .orderedAscending
+            case .orderedSame:       return .orderedSame
+            }
+        }
+    }
+
+    private func str(_ a: String, _ b: String) -> ComparisonResult {
+        a.localizedCaseInsensitiveCompare(b)
+    }
+    private func num(_ a: Double, _ b: Double) -> ComparisonResult {
+        a < b ? .orderedAscending : (a > b ? .orderedDescending : .orderedSame)
     }
 }
 

@@ -221,6 +221,119 @@ extension DatabasePool {
             try db.execute(sql: "ALTER TABLE watched_folders ADD COLUMN scanned_file_count INTEGER")
         }
 
+        migrator.registerMigration("v5_rich_metadata") { db in
+            // Persist the full BWF/iXML/RIFF-INFO field set so metadata profiles
+            // can display them. Existing rows backfill on next forced rescan.
+            try db.alter(table: "audio_files") { t in
+                // bext
+                t.add(column: "bwf_originator_ref", .text).defaults(to: "")
+                t.add(column: "bwf_time",           .text).defaults(to: "")
+                t.add(column: "bwf_version",        .integer)
+                t.add(column: "bwf_umid",           .text).defaults(to: "")
+                t.add(column: "bwf_coding_history", .text).defaults(to: "")
+                t.add(column: "loudness_range",     .double)
+                t.add(column: "max_true_peak",      .double)
+                t.add(column: "max_momentary",      .double)
+                t.add(column: "max_short_term",     .double)
+                // iXML
+                t.add(column: "ixml_circled",         .text).defaults(to: "")
+                t.add(column: "ixml_track_names",     .text).defaults(to: "")
+                t.add(column: "ixml_project",         .text).defaults(to: "")
+                t.add(column: "ixml_file_uid",        .text).defaults(to: "")
+                t.add(column: "ixml_ubits",           .text).defaults(to: "")
+                t.add(column: "ixml_file_sample_rate", .text).defaults(to: "")
+                t.add(column: "ixml_master_speed",    .text).defaults(to: "")
+                t.add(column: "ixml_timecode_rate",   .text).defaults(to: "")
+                t.add(column: "ixml_timecode_flag",   .text).defaults(to: "")
+                t.add(column: "ixml_family_name",     .text).defaults(to: "")
+                t.add(column: "ixml_location_name",   .text).defaults(to: "")
+                // RIFF INFO
+                t.add(column: "info_title",      .text).defaults(to: "")
+                t.add(column: "info_artist",     .text).defaults(to: "")
+                t.add(column: "info_comment",    .text).defaults(to: "")
+                t.add(column: "info_copyright",  .text).defaults(to: "")
+                t.add(column: "info_genre",      .text).defaults(to: "")
+                t.add(column: "info_created",    .text).defaults(to: "")
+                t.add(column: "info_software",   .text).defaults(to: "")
+                t.add(column: "info_engineer",   .text).defaults(to: "")
+                t.add(column: "info_source",     .text).defaults(to: "")
+                t.add(column: "info_product",    .text).defaults(to: "")
+                t.add(column: "info_subject",    .text).defaults(to: "")
+                t.add(column: "info_technician", .text).defaults(to: "")
+            }
+
+            // Rebuild FTS to add new searchable fields (fts5 can't be ALTERed).
+            try db.execute(sql: "DROP TRIGGER IF EXISTS audio_files_ai")
+            try db.execute(sql: "DROP TRIGGER IF EXISTS audio_files_ad")
+            try db.execute(sql: "DROP TRIGGER IF EXISTS audio_files_au")
+            try db.execute(sql: "DROP TABLE IF EXISTS audio_files_fts")
+
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE audio_files_fts USING fts5(
+                    filename, bwf_description, bwf_originator, bwf_scene, bwf_take,
+                    notes, tape_name, ixml_note, ucs_category, ucs_sub_category,
+                    ixml_track_names, bwf_coding_history, info_title, info_artist,
+                    info_comment, info_genre, tags_denorm,
+                    content='audio_files',
+                    content_rowid='id',
+                    tokenize='unicode61 remove_diacritics 2'
+                )
+            """)
+
+            try db.execute(sql: """
+                INSERT INTO audio_files_fts(
+                    rowid, filename, bwf_description, bwf_originator, bwf_scene, bwf_take,
+                    notes, tape_name, ixml_note, ucs_category, ucs_sub_category,
+                    ixml_track_names, bwf_coding_history, info_title, info_artist,
+                    info_comment, info_genre, tags_denorm)
+                SELECT
+                    id, filename, bwf_description, bwf_originator, bwf_scene, bwf_take,
+                    notes, tape_name, ixml_note, ucs_category, ucs_sub_category,
+                    ixml_track_names, bwf_coding_history, info_title, info_artist,
+                    info_comment, info_genre, ''
+                FROM audio_files
+            """)
+
+            let cols = """
+                filename, bwf_description, bwf_originator, bwf_scene, bwf_take,
+                notes, tape_name, ixml_note, ucs_category, ucs_sub_category,
+                ixml_track_names, bwf_coding_history, info_title, info_artist,
+                info_comment, info_genre, tags_denorm
+            """
+            let newVals = """
+                new.filename, new.bwf_description, new.bwf_originator, new.bwf_scene,
+                new.bwf_take, new.notes, new.tape_name, new.ixml_note, new.ucs_category,
+                new.ucs_sub_category, new.ixml_track_names, new.bwf_coding_history,
+                new.info_title, new.info_artist, new.info_comment, new.info_genre, ''
+            """
+            let oldVals = """
+                old.filename, old.bwf_description, old.bwf_originator, old.bwf_scene,
+                old.bwf_take, old.notes, old.tape_name, old.ixml_note, old.ucs_category,
+                old.ucs_sub_category, old.ixml_track_names, old.bwf_coding_history,
+                old.info_title, old.info_artist, old.info_comment, old.info_genre, ''
+            """
+            try db.execute(sql: """
+                CREATE TRIGGER audio_files_ai AFTER INSERT ON audio_files BEGIN
+                    INSERT INTO audio_files_fts(rowid, \(cols))
+                    VALUES (new.id, \(newVals));
+                END
+            """)
+            try db.execute(sql: """
+                CREATE TRIGGER audio_files_ad AFTER DELETE ON audio_files BEGIN
+                    INSERT INTO audio_files_fts(audio_files_fts, rowid, \(cols))
+                    VALUES ('delete', old.id, \(oldVals));
+                END
+            """)
+            try db.execute(sql: """
+                CREATE TRIGGER audio_files_au AFTER UPDATE ON audio_files BEGIN
+                    INSERT INTO audio_files_fts(audio_files_fts, rowid, \(cols))
+                    VALUES ('delete', old.id, \(oldVals));
+                    INSERT INTO audio_files_fts(rowid, \(cols))
+                    VALUES (new.id, \(newVals));
+                END
+            """)
+        }
+
         try migrator.migrate(pool)
         return pool
     }

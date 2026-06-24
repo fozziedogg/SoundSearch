@@ -67,22 +67,10 @@ final class LibraryService {
             file.channels   = wav.channels
             file.duration   = wav.duration
 
-            if let bextData = wav.bextData,
-               let bext = try? BEXTChunk.parse(from: bextData) {
-                file.bwfDescription  = Self.ptSafe(bext.description)
-                file.bwfOriginator   = bext.originator
-                file.bwfTimeRefLow   = Int64(bext.timeReferenceLow)
-                file.bwfTimeRefHigh  = Int64(bext.timeReferenceHigh)
-                file.originationDate = bext.originationDate
-            }
-            if let ixmlData = wav.ixmlData {
-                let fields = iXMLChunk.parse(from: ixmlData)
-                file.bwfScene       = fields.scene           ?? ""
-                file.bwfTake        = fields.take            ?? ""
-                file.tapeName       = fields.tapeName        ?? ""
-                file.ixmlNote       = fields.note            ?? ""
-                file.ucsCategory    = fields.ucsCategory     ?? ""
-                file.ucsSubCategory = fields.ucsSubCategory  ?? ""
+            // Comprehensive BWF/iXML/RIFF-INFO read (covers all metadata-profile
+            // fields). Uses a memory-mapped pass that only touches header chunks.
+            if let meta = BWFParser.parse(url: url) {
+                Self.apply(meta, to: &file)
             }
         } else {
             // AIFF / other: AudioToolbox reads only the file header, not audio data
@@ -154,5 +142,58 @@ final class LibraryService {
     private static func ptSafe(_ s: String) -> String {
         s.components(separatedBy: CharacterSet(charactersIn: ":/\\*?\"<>|"))
          .joined(separator: "-")
+    }
+
+    /// Maps parsed BWF metadata into the persisted AudioFile columns.
+    private static func apply(_ meta: BWFMetadata, to file: inout AudioFile) {
+        // bext
+        file.bwfDescription   = ptSafe(meta.description ?? "")
+        file.bwfOriginator    = meta.originator ?? ""
+        file.bwfOriginatorRef = meta.originatorRef ?? ""
+        file.originationDate  = meta.date ?? ""
+        file.bwfTime          = meta.time ?? ""
+        if let ref = meta.timeReference {
+            file.bwfTimeRefLow  = Int64(UInt32(truncatingIfNeeded: ref))
+            file.bwfTimeRefHigh = Int64(UInt32(truncatingIfNeeded: ref >> 32))
+        }
+        file.bwfVersion       = meta.version
+        file.bwfUMID          = meta.umid ?? ""
+        file.bwfCodingHistory = meta.codingHistory ?? ""
+        file.lufs             = meta.loudness ?? file.lufs
+        file.loudnessRange    = meta.loudnessRange
+        file.maxTruePeak      = meta.maxTruePeak
+        file.maxMomentary     = meta.maxMomentary
+        file.maxShortTerm     = meta.maxShortTerm
+        // iXML
+        file.bwfScene           = meta.scene ?? ""
+        file.bwfTake            = meta.take ?? ""
+        file.tapeName           = meta.tape ?? ""
+        file.ixmlNote           = meta.note ?? ""
+        file.ixmlCircled        = meta.circled ?? ""
+        file.ucsCategory        = meta.category ?? ""
+        file.ucsSubCategory     = meta.subCategory ?? ""
+        file.ixmlTrackNames     = meta.trackNamesJoined ?? ""
+        file.ixmlProject        = meta.project ?? ""
+        file.ixmlFileUID        = meta.fileUID ?? ""
+        file.ixmlUbits          = meta.ubits ?? ""
+        file.ixmlFileSampleRate = meta.fileSampleRate ?? ""
+        file.ixmlMasterSpeed    = meta.masterSpeed ?? ""
+        file.ixmlTimecodeRate   = meta.timecodeRate ?? ""
+        file.ixmlTimecodeFlag   = meta.timecodeFlag ?? ""
+        file.ixmlFamilyName     = meta.familyName ?? ""
+        file.ixmlLocationName   = meta.locationName ?? ""
+        // RIFF INFO
+        file.infoTitle      = meta.infoTitle ?? ""
+        file.infoArtist     = meta.infoArtist ?? ""
+        file.infoComment    = meta.infoComment ?? ""
+        file.infoCopyright  = meta.infoCopyright ?? ""
+        file.infoGenre      = meta.infoGenre ?? ""
+        file.infoCreated    = meta.infoCreated ?? ""
+        file.infoSoftware   = meta.infoSoftware ?? ""
+        file.infoEngineer   = meta.infoEngineer ?? ""
+        file.infoSource     = meta.infoSource ?? ""
+        file.infoProduct    = meta.infoProduct ?? ""
+        file.infoSubject    = meta.infoSubject ?? ""
+        file.infoTechnician = meta.infoTechnician ?? ""
     }
 }

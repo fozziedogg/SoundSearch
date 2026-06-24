@@ -53,8 +53,13 @@ struct SFXLibraryApp: App {
         .windowStyle(.titleBar)
 
         Settings {
-            AudioSettingsView()
-                .environment(env)
+            TabView {
+                AudioSettingsView()
+                    .environment(env)
+                    .tabItem { Label("Audio", systemImage: "speaker.wave.2") }
+                ProfilesSettingsView()
+                    .tabItem { Label("Metadata Profiles", systemImage: "tablecells") }
+            }
         }
         .commands {
             CommandGroup(replacing: .newItem) { }

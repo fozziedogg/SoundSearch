@@ -59,12 +59,13 @@ struct BEXTChunk {
         let umidStart = 256 + 32 + 32 + 10 + 8 + 8 + 2
         let umid = data.subdata(in: umidStart..<umidStart+64)
 
-        // Loudness fields (version 2, at offset 338)
-        let loudnessValue        = data.loadLE(Int16.self, at: 338)
-        let loudnessRange        = data.loadLE(Int16.self, at: 340)
-        let maxTruePeak          = data.loadLE(Int16.self, at: 342)
-        let maxMomentary         = data.loadLE(Int16.self, at: 344)
-        let maxShortTerm         = data.loadLE(Int16.self, at: 346)
+        // Loudness fields (version 2+) per EBU Tech 3285: offsets 412–420, after
+        // the 64-byte UMID. Must match encode() which writes them at 412+.
+        let loudnessValue        = data.loadLE(Int16.self, at: 412)
+        let loudnessRange        = data.loadLE(Int16.self, at: 414)
+        let maxTruePeak          = data.loadLE(Int16.self, at: 416)
+        let maxMomentary         = data.loadLE(Int16.self, at: 418)
+        let maxShortTerm         = data.loadLE(Int16.self, at: 420)
 
         // CodingHistory starts at 602, null-terminated ASCII
         let codingHistory: String

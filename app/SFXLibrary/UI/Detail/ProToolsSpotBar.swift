@@ -42,15 +42,18 @@ struct ProToolsSpotBar: View {
             spotURL = gained
         }
 
-        let request = PTSLContentSpotRequest(
-            fileURL:          spotURL,
-            contentStartSecs: (player.selectionStart ?? 0.0) * duration,
-            contentEndSecs:   (player.selectionEnd   ?? 1.0) * duration,
-            handles:          0,
-            fileSampleRate:   sampleRate
-        )
+        // Source in/out (samples) — the AppleEvent trims the region inside Pro
+        // Tools, so no temp-file selection export is needed.
+        let sr = Double(sampleRate)
+        let srcStart = Int32(clamping: Int64(((player.selectionStart ?? 0.0) * duration * sr).rounded()))
+        let srcStop  = Int32(clamping: Int64(((player.selectionEnd   ?? 1.0) * duration * sr).rounded()))
+        let name = spotURL.deletingPathExtension().lastPathComponent
+
         await run {
-            try await env.ptslClient.spotContent(request)
+            try await ProToolsSpotter.spot(fileURL: spotURL,
+                                           srcStartSample: srcStart,
+                                           srcStopSample: srcStop,
+                                           name: name)
         }
     }
 
