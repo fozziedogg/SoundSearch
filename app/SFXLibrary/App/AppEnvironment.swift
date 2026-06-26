@@ -663,14 +663,10 @@ final class AppEnvironment {
         let limit = browseLimit
         let (whereClause, queryArgs) = buildBrowseWhereClause()
 
+        // SELECT * so the row always carries every AudioFile column — an explicit
+        // list silently breaks decoding whenever a migration adds columns.
         let sql = """
-            SELECT id, file_url, bookmark_data, filename, file_size, mtime, format,
-                   duration, sample_rate, bit_depth, channels, lufs,
-                   bwf_description, bwf_originator, bwf_scene, bwf_take,
-                   bwf_time_ref_low, bwf_time_ref_high, origination_date,
-                   tape_name, ixml_note, ucs_category, ucs_sub_category,
-                   notes, star_rating, date_added, last_modified
-            FROM audio_files \(whereClause) ORDER BY filename
+            SELECT * FROM audio_files \(whereClause) ORDER BY filename
             LIMIT \(limit)
             """
         let countSQL = "SELECT COUNT(*) FROM audio_files \(whereClause)"
