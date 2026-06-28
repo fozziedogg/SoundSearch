@@ -15,6 +15,7 @@ struct WAVMetadata {
     var duration: Double?
     var bextData: Data?
     var ixmlData: Data?
+    var infoData: Data?   // LIST/INFO chunk payload (starts with the "INFO" form id)
 }
 
 struct RIFFChunk {
@@ -68,11 +69,20 @@ struct RIFFParser {
                 }
 
             } else if fourCC == "data" {
-                // Compute duration from data size and format, then stop — don't seek into audio data
+                // Compute duration from data size and format, then SEEK past the
+                // audio (never read it) and keep scanning — iXML/LIST often follow
+                // the data chunk. This stays cheap: one seek over the audio.
                 if let sr = result.sampleRate, sr > 0, blockAlign > 0 {
                     result.duration = Double(size) / Double(sr * blockAlign)
                 }
-                break
+                guard paddedSize > 0 else { break }
+                handle.seek(toFileOffset: handle.offsetInFile + UInt64(paddedSize))
+
+            } else if fourCC == "LIST" {
+                let safeSize = min(size, 1_048_576)
+                result.infoData = handle.readData(ofLength: safeSize)
+                if paddedSize > safeSize { handle.seek(toFileOffset: handle.offsetInFile + UInt64(paddedSize - safeSize)) }
+                else if size & 1 == 1 { handle.seek(toFileOffset: handle.offsetInFile + 1) }
 
             } else if fourCC == "bext" {
                 let safeSize = min(size, 1_048_576)   // bext is never legitimately > 1 MB

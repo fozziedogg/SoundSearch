@@ -67,9 +67,10 @@ final class LibraryService {
             file.channels   = wav.channels
             file.duration   = wav.duration
 
-            // Comprehensive BWF/iXML/RIFF-INFO read (covers all metadata-profile
-            // fields). Uses a memory-mapped pass that only touches header chunks.
-            if let meta = BWFParser.parse(url: url) {
+            // Comprehensive BWF/iXML/RIFF-INFO mapping from the chunk blobs the
+            // streaming pass already extracted — no second file read.
+            if wav.bextData != nil || wav.ixmlData != nil || wav.infoData != nil {
+                let meta = BWFParser.parse(bext: wav.bextData, ixml: wav.ixmlData, info: wav.infoData)
                 Self.apply(meta, to: &file)
             }
         } else {

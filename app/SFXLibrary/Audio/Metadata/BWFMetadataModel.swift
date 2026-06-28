@@ -303,6 +303,21 @@ enum BWFParser {
         return parse(data: data)
     }
 
+    /// Parse from already-extracted chunk blobs (e.g. from RIFFParser's single
+    /// streaming pass) — avoids re-reading/mapping the whole file. Each blob is a
+    /// standalone chunk payload; `info` is the LIST payload starting with "INFO".
+    static func parse(bext: Data?, ixml: Data?, info: Data?) -> BWFMetadata {
+        var meta = BWFMetadata()
+        if let bext { parseBext(data: bext, start: 0, size: bext.count, into: &meta) }
+        if let ixml { parseIXML(data: ixml, start: 0, size: ixml.count, into: &meta) }
+        if let info, info.count >= 4,
+           String(bytes: info[info.startIndex..<info.startIndex+4], encoding: .ascii) == "INFO" {
+            parseInfoList(data: info, start: 4, size: info.count - 4, into: &meta)
+        }
+        applyDescriptionScheme(into: &meta)
+        return meta
+    }
+
     static func parse(data: Data) -> BWFMetadata? {
         guard data.count > 12,
               data[0..<4] == Data("RIFF".utf8),
