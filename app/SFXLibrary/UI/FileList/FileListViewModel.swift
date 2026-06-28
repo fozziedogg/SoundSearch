@@ -1,28 +1,52 @@
 import Foundation
 import Combine
 
-enum SearchScope: String, CaseIterable, Identifiable {
-    case all           = "All"
-    case name          = "Name"
-    case description   = "Description"
-    case ucsCategory   = "UCS Cat"
-    case ucsSubCategory = "UCS Sub"
-    case tape          = "Tape"
-    case note          = "Note"
+/// Search scope: All, filename (Name), or a specific metadata field. The field
+/// cases are driven by the active metadata profile (see `available(for:)`).
+enum SearchScope: Hashable, Identifiable {
+    case all
+    case name
+    case field(BWFFieldKey)
 
-    var id: String { rawValue }
+    var id: String {
+        switch self {
+        case .all:            return "__all__"
+        case .name:           return "__name__"
+        case .field(let key): return key.rawValue
+        }
+    }
 
-    /// FTS5 column name(s) for a scoped query, nil means search all columns.
+    var label: String {
+        switch self {
+        case .all:            return "All"
+        case .name:           return "Name"
+        case .field(let key): return key.label
+        }
+    }
+
+    /// FTS5 column for a fast scoped match. nil for `.all` (match all columns)
+    /// or for fields that aren't FTS-indexed (those use `likeColumn` instead).
     var ftsColumn: String? {
         switch self {
-        case .all:           return nil
-        case .name:          return "filename"
-        case .description:   return "bwf_description"
-        case .ucsCategory:   return "ucs_category"
-        case .ucsSubCategory: return "ucs_sub_category"
-        case .tape:          return "tape_name"
-        case .note:          return "ixml_note"
+        case .all:            return nil
+        case .name:           return "filename"
+        case .field(let key): return key.isFTSColumn ? key.searchColumn : nil
         }
+    }
+
+    /// Column for a LIKE fallback when the field isn't in the FTS index.
+    var likeColumn: String? {
+        switch self {
+        case .all, .name:     return nil
+        case .field(let key): return key.isFTSColumn ? nil : key.searchColumn
+        }
+    }
+
+    /// Scopes offered for a profile: All, Name, then the profile's searchable fields.
+    static func available(for profile: MetadataProfile) -> [SearchScope] {
+        [.all, .name] + profile.fields
+            .filter { $0.searchColumn != nil }
+            .map { SearchScope.field($0) }
     }
 }
 

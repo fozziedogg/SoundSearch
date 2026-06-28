@@ -27,6 +27,84 @@ struct FileListView: View {
         MetadataProfileStore.loaded(from: profilesJSON).profiles
     }
 
+    private var searchScopes: [SearchScope] {
+        SearchScope.available(for: activeProfile)
+    }
+
+    // MARK: - Header inset (status banner + profile switch + search)
+
+    @ViewBuilder private var headerInset: some View {
+        VStack(spacing: 0) {
+            if showHeader { PanelHeader(title: "Browser") }
+            statusBanner
+            profileBar
+            SearchBar(text: $vm.searchQuery, scope: $vm.searchScope,
+                      scopes: searchScopes,
+                      isFocused: $searchFocused)
+                .padding(8)
+                .background(.bar)
+        }
+    }
+
+    @ViewBuilder private var statusBanner: some View {
+        if !env.foldersWithChanges.isEmpty && !env.isScanning {
+            Button { showChangesSheet = true } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.yellow)
+                        .font(.system(size: 10))
+                    Text("Folder changes detected — click for details")
+                        .font(.system(size: 10))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.yellow.opacity(0.08))
+            }
+            .buttonStyle(.plain)
+        } else if env.isScanning {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .scaleEffect(0.5)
+                        .frame(width: 12, height: 12)
+                    Text("\(env.scannedFileCount) files scanned…")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.primary)
+                    Spacer()
+                }
+                if !env.currentScanFile.isEmpty {
+                    Text(env.currentScanFile)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.accentColor.opacity(0.07))
+        } else {
+            let capped = env.totalAudioFileCount > env.browseLimit
+            HStack(spacing: 4) {
+                Text(capped
+                     ? "Showing \(env.audioFiles.count) of \(env.totalAudioFileCount) records — search to find others"
+                     : "Showing \(env.audioFiles.count) of \(env.totalAudioFileCount) records")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(capped ? Color.yellow.opacity(0.08) : Color.clear)
+        }
+    }
+
     private var profileBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "tablecells")
@@ -83,7 +161,7 @@ struct FileListView: View {
         }
     }
 
-    var body: some View {
+    private var fileTable: some View {
         Table(of: AudioFileRow.self,
               selection: $selectedID,
               sortOrder: $sortOrder,
@@ -122,72 +200,14 @@ struct FileListView: View {
                     }
             }
         }
+    }
+
+    // Split across two layers so the modifier chain stays within the Swift
+    // type-checker's complexity budget.
+    private var tableLayer: some View {
+        fileTable
         .scrollIndicators(.visible)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(spacing: 0) {
-                if showHeader { PanelHeader(title: "Browser") }
-                if !env.foldersWithChanges.isEmpty && !env.isScanning {
-                    Button { showChangesSheet = true } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.yellow)
-                                .font(.system(size: 10))
-                            Text("Folder changes detected — click for details")
-                                .font(.system(size: 10))
-                                .foregroundColor(.primary)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.yellow.opacity(0.08))
-                    }
-                    .buttonStyle(.plain)
-                } else if env.isScanning {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                                .scaleEffect(0.5)
-                                .frame(width: 12, height: 12)
-                            Text("\(env.scannedFileCount) files scanned…")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.primary)
-                            Spacer()
-                        }
-                        if !env.currentScanFile.isEmpty {
-                            Text(env.currentScanFile)
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.accentColor.opacity(0.07))
-                } else {
-                    let capped = env.totalAudioFileCount > env.browseLimit
-                    HStack(spacing: 4) {
-                        Text(capped
-                             ? "Showing \(env.audioFiles.count) of \(env.totalAudioFileCount) records — search to find others"
-                             : "Showing \(env.audioFiles.count) of \(env.totalAudioFileCount) records")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(capped ? Color.yellow.opacity(0.08) : Color.clear)
-                }
-                profileBar
-                SearchBar(text: $vm.searchQuery, scope: $vm.searchScope, isFocused: $searchFocused)
-                    .padding(8)
-                    .background(.bar)
-            }
-        }
+        .safeAreaInset(edge: .top, spacing: 0) { headerInset }
         .overlay {
             if sortedRows.isEmpty {
                 Text(vm.searchQuery.isEmpty ? "Add a folder to get started" : "No results")
@@ -215,6 +235,10 @@ struct FileListView: View {
             selectedFile = env.audioFiles.first { $0.id == id }
                         ?? vm.searchResults.first { $0.id == id }
         }
+    }
+
+    var body: some View {
+        tableLayer
         .onChange(of: vm.searchQuery) { _, _ in
             Task { await vm.search(repo: env.searchRepository, folderFilter: env.folderFilter) }
         }
@@ -228,6 +252,8 @@ struct FileListView: View {
         .onChange(of: env.activeProjectID) { _, _ in
             vm.searchQuery = ""
         }
+        .onChange(of: activeProfileID) { _, _ in resetScopeIfNeeded() }
+        .onChange(of: profilesJSON)    { _, _ in resetScopeIfNeeded() }
         .background {
             Button("") {
                 searchFocused = true
@@ -293,6 +319,13 @@ struct FileListView: View {
             .font(.system(size: 11))
             .foregroundColor(.secondary)
             .lineLimit(1)
+    }
+
+    /// If the active profile no longer contains the selected search field, fall back to All.
+    private func resetScopeIfNeeded() {
+        if !SearchScope.available(for: activeProfile).contains(vm.searchScope) {
+            vm.searchScope = .all
+        }
     }
 
     private func formatDuration(_ s: Double) -> String {

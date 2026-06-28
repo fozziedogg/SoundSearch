@@ -145,6 +145,68 @@ enum BWFFieldKey: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Underlying text column used for searching this field, or nil for
+    /// numeric/computed/non-persisted fields that can't be text-searched.
+    var searchColumn: String? {
+        switch self {
+        case .ixmlScene:        return "bwf_scene"
+        case .ixmlTake:         return "bwf_take"
+        case .ixmlTape:         return "tape_name"
+        case .ixmlNote:         return "ixml_note"
+        case .ixmlCircled:      return "ixml_circled"
+        case .ixmlTrackNames:   return "ixml_track_names"
+        case .ixmlCategory:     return "ucs_category"
+        case .ixmlSubCategory:  return "ucs_sub_category"
+        case .ixmlProject:      return "ixml_project"
+        case .ixmlFileUID:      return "ixml_file_uid"
+        case .ixmlUbits:        return "ixml_ubits"
+        case .ixmlMasterSpeed:  return "ixml_master_speed"
+        case .ixmlTimecodeRate: return "ixml_timecode_rate"
+        case .ixmlTimecodeFlag: return "ixml_timecode_flag"
+        case .ixmlFileSampleRate: return "ixml_file_sample_rate"
+        case .ixmlFamilyName:   return "ixml_family_name"
+        case .ixmlLocationName: return "ixml_location_name"
+        case .bextDescription:  return "bwf_description"
+        case .bextOriginator:   return "bwf_originator"
+        case .bextOriginatorRef: return "bwf_originator_ref"
+        case .bextDate:         return "origination_date"
+        case .bextTime:         return "bwf_time"
+        case .bextUMID:         return "bwf_umid"
+        case .bextCodingHistory: return "bwf_coding_history"
+        case .infoTitle:      return "info_title"
+        case .infoArtist:     return "info_artist"
+        case .infoComment:    return "info_comment"
+        case .infoCopyright:  return "info_copyright"
+        case .infoGenre:      return "info_genre"
+        case .infoCreated:    return "info_created"
+        case .infoSoftware:   return "info_software"
+        case .infoEngineer:   return "info_engineer"
+        case .infoSource:     return "info_source"
+        case .infoProduct:    return "info_product"
+        case .infoSubject:    return "info_subject"
+        case .infoTechnician: return "info_technician"
+        case .bextTimeReference, .bextTimeReferenceSamples, .bextVersion,
+             .bextLoudness, .bextLoudnessRange, .bextMaxTruePeak, .bextMaxMomentary,
+             .bextMaxShortTerm, .ixmlWildTrack, .ixmlNoGood, .ixmlFalseStart,
+             .ixmlSyncPoint, .ixmlDigitizerRate, .ixmlFamilyUID, .ixmlFileSetIndex,
+             .ixmlTotalFiles, .ixmlLocationGPS:
+            return nil
+        }
+    }
+
+    /// True when `searchColumn` is part of the FTS5 index (fast scoped search).
+    /// Others fall back to a LIKE query. Keep in sync with the v5 FTS table.
+    var isFTSColumn: Bool {
+        switch self {
+        case .bextDescription, .bextOriginator, .ixmlScene, .ixmlTake, .ixmlTape,
+             .ixmlNote, .ixmlCategory, .ixmlSubCategory, .ixmlTrackNames,
+             .bextCodingHistory, .infoTitle, .infoArtist, .infoComment, .infoGenre:
+            return true
+        default:
+            return false
+        }
+    }
+
     var group: FieldGroup {
         switch self {
         case .ixmlScene, .ixmlTake, .ixmlTape, .ixmlNote, .ixmlCircled,

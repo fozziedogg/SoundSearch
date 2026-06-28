@@ -3,6 +3,7 @@ import SwiftUI
 struct SearchBar: View {
     @Binding var text: String
     @Binding var scope: SearchScope
+    var scopes: [SearchScope]
     var isFocused: FocusState<Bool>.Binding
 
     var body: some View {
@@ -14,8 +15,8 @@ struct SearchBar: View {
 
             // Scope picker — compact menu style
             Picker("", selection: $scope) {
-                ForEach(SearchScope.allCases) { s in
-                    Text(s.rawValue).tag(s)
+                ForEach(scopes) { s in
+                    Text(s.label).tag(s)
                 }
             }
             .labelsHidden()
@@ -28,7 +29,7 @@ struct SearchBar: View {
                 .frame(height: 14)
                 .padding(.horizontal, 4)
 
-            TextField(scope == .all ? "Search…" : "Search \(scope.rawValue)…",
+            TextField(scope == .all ? "Search…" : "Search \(scope.label)…",
                       text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
