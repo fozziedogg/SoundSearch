@@ -36,6 +36,24 @@ final class SearchRepository {
                 return try AudioFile.fetchAll(db, sql: sql, arguments: args)
             }
 
+            // Non-FTS-indexed profile field → LIKE fallback on its column.
+            // (Column name comes from our own mapping, never user input.)
+            if let likeCol = scope.likeColumn {
+                let tokens = query.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+                let clause = tokens.map { _ in "\(likeCol) LIKE ? ESCAPE '\\'" }.joined(separator: " AND ")
+                let sql = """
+                    SELECT * FROM audio_files
+                    WHERE (\(clause))
+                    \(folderClause)
+                    \(minStars > 0 ? "AND star_rating >= \(minStars)" : "")
+                    ORDER BY filename
+                    LIMIT \(limit) OFFSET \(offset)
+                """
+                var args: StatementArguments = StatementArguments(tokens.map { "%\(Self.escapeLike($0))%" })
+                if let fa = folderArg { args += [fa] }
+                return try AudioFile.fetchAll(db, sql: sql, arguments: args)
+            }
+
             let ftsQuery = buildFTSQuery(query: query, scope: scope)
             let starClause = minStars > 0 ? "AND audio_files.star_rating >= \(minStars)" : ""
             let sql = """
@@ -68,6 +86,13 @@ final class SearchRepository {
             """
             return try Int.fetchOne(db, sql: sql, arguments: [ftsQuery]) ?? 0
         }
+    }
+
+    /// Escapes LIKE wildcards so a search term is matched literally (with ESCAPE '\').
+    private static func escapeLike(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "%", with: "\\%")
+         .replacingOccurrences(of: "_", with: "\\_")
     }
 
     // MARK: - FTS5 query builder

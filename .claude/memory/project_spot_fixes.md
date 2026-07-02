@@ -1,26 +1,16 @@
 ---
-name: Spot to PT pending fixes
-description: Designed but not yet implemented fixes for the PT spot workflow, ready to execute next session
-type: project
+name: spot-to-pt-appleevent-spottoregion-working
+description: Spot-to-Pro-Tools now uses the Avid RegionSpotter AppleEvent; PTSL removed; old PTSL fixes obsolete
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: 073976a9-6288-4268-8284-3a0c7bf94946
 ---
 
-Next session should implement these changes in order:
+Spot to Pro Tools now uses the classic Avid RegionSpotter AppleEvent (`Sd2a`/`SRgn`), NOT PTSL/gRPC. Implemented in `app/SFXLibrary/ProTools/ProToolsSpotter.swift` (commit b0a926d on branch `feature/ptpeep-spotting-and-profiles`). The whole PTSL gRPC stack (PTSLClient + PTSL_minimal.* + grpc-swift/swift-protobuf/NIO deps) was deleted — so the 4 older PTSL spot fixes that used to be listed here are obsolete (item 3, `player.stop()` on spot, is already in ProToolsSpotBar).
 
-## 1. Fix PT 2024 legacy spot — wrong track destination
-**File:** `app/SFXLibrary/ProTools/PTSLClient.swift` — `importLegacy()` method
-**Problem:** `audio_destination: "MD_NewTrack"` creates a new track instead of placing on the selected track.
-**Fix:** Change to `"AudioDestination_SelectedTrack"` (verify exact enum string in `sdk/PTSL_SDK_CPP.2025.10.0.1267955` first).
-**Why:** Both Spot and Spot Peak land at session start on a new track in PT 2024 — this is the root cause.
+Key behavior (from the Avid SDK source at `~/developer/docs/SpotToRegion/`): `Trak=-99` spots into the **first edit-selected track**; `SMSt` is the sample offset from the selection start; `Star`/`Stop` are the source in/out within the file. It is **selection-based** — there is no "track under the playhead." If no track is edit-selected, or the file's channel width doesn't match the selected track, Pro Tools creates a NEW track (inherent PT behavior, not a bug).
 
-## 2. Channel mismatch errors
-**Approach:** Don't pre-check. PT returns an error string in `responseErrorJson` on mismatch — just make sure it surfaces to the user readably in `ProToolsSpotBar.swift`. Already captured, may just need UI wiring verified.
+Confirmed working: stereo file → stereo edit-selected track lands correctly. FILE is sent as `typeFileURL`; the Avid SDK uses classic `typeAlias` — if some PT version ever routes a fileURL spot to a new track, switching to `typeAlias` is the fix to try. Drag-to-PT (file promise + BEXT timeReference patching via SpotFileBuilder) is unchanged and independent.
 
-## 3. Stop transport on spot/drag button press
-**Files:** `app/SFXLibrary/UI/Detail/ProToolsSpotBar.swift` and `app/SFXLibrary/UI/Detail/WaveformDragBar.swift`
-**Fix:** Call `player.stop()` at the top of each button action before doing any spot/drag work.
-
-## 4. Stop playback on app defocus — NEW SETTING
-**Setting:** `stopOnDefocus: Bool`, default `true`, persisted in UserDefaults key `"stopOnDefocus"`
-**Where to add:** `AppEnvironment.swift` alongside other UserDefaults settings (e.g. near `autoPlayOnSelect`)
-**Observer:** Add `NSApplication.willResignActiveNotification` observer in `AudioPlayer` or `AppEnvironment` — check `env.stopOnDefocus` before stopping.
-**Settings UI:** Add toggle in `AudioSettingsView.swift` under the Audio Output section or a new "Playback" section. Label: "Stop playback when switching apps". Default on.
+See [[reference_ptsl_sdk]] only for unrelated PTSL work; for spotting, edit ProToolsSpotter.swift.
