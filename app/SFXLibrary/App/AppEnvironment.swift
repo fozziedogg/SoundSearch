@@ -462,6 +462,15 @@ final class AppEnvironment {
         if trackedProjectID == id { trackedProjectID = nil }
     }
 
+    /// Resolves a project's files (in insertion order) to `AudioFile` records for
+    /// export. Falls back to the DB for files not in the current browse list.
+    func filesForProject(_ id: Int64) async -> [AudioFile] {
+        guard let urls = try? await projectRepository.fileURLs(forProject: id) else { return [] }
+        return urls.compactMap { url in
+            audioFiles.first { $0.fileURL == url } ?? (try? libraryService.fetch(fileURL: url)) ?? nil
+        }
+    }
+
     /// Adds `fileURL` to the tracked project if auto-add is enabled.
     /// Uses `trackedProjectID` so it works even when browsing All Files.
     func addToActiveProject(fileURL: String) {
