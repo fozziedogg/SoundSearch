@@ -39,7 +39,7 @@ extension AudioFile {
         // File attributes
         case .filePath:         return ne(fileURL)
         case .containingFolder:
-            return ne(URL(fileURLWithPath: fileURL).deletingLastPathComponent().path)
+            return ne(URL(fileURLWithPath: fileURL).deletingLastPathComponent().lastPathComponent)
         // bext
         case .bextDescription:   return ne(bwfDescription)
         case .bextOriginator:    return ne(bwfOriginator)
