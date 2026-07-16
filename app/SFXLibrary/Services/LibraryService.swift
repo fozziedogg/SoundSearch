@@ -89,6 +89,10 @@ final class LibraryService {
         try fileRepo.fetchAllMtimes()
     }
 
+    func fetch(fileURL: String) throws -> AudioFile? {
+        try fileRepo.fetch(fileURL: fileURL)
+    }
+
     func fetchFileURLs(inFolder path: String) throws -> [String] {
         try db.read { db in
             try String.fetchAll(db,

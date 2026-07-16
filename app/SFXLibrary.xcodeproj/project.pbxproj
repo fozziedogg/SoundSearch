@@ -118,6 +118,7 @@
 			name = SFXLibrary;
 			packageProductDependencies = (
 				A438E7382F8718FD00DBE776 /* GRDB */,
+				BB01AE0100000000000000B2 /* SwiftLAME */,
 			);
 			productName = SFXLibrary;
 			productReference = A438E6582F8714A200DBE776 /* SFXLibrary.app */;
@@ -203,6 +204,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A438E7372F8718FD00DBE776 /* XCRemoteSwiftPackageReference "GRDB" */,
+				BB01AE0100000000000000B1 /* XCRemoteSwiftPackageReference "SwiftLAME" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A438E6592F8714A200DBE776 /* Products */;
@@ -626,6 +628,14 @@
 				kind = branch;
 			};
 		};
+			BB01AE0100000000000000B1 /* XCRemoteSwiftPackageReference "SwiftLAME" */ = {
+				isa = XCRemoteSwiftPackageReference;
+				repositoryURL = "https://github.com/hidden-spectrum/SwiftLAME";
+				requirement = {
+					kind = upToNextMajorVersion;
+					minimumVersion = 0.1.0;
+				};
+			};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -634,6 +644,11 @@
 			package = A438E7372F8718FD00DBE776 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
 		};
+			BB01AE0100000000000000B2 /* SwiftLAME */ = {
+				isa = XCSwiftPackageProductDependency;
+				package = BB01AE0100000000000000B1 /* XCRemoteSwiftPackageReference "SwiftLAME" */;
+				productName = SwiftLAME;
+			};
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A438E6502F8714A200DBE776 /* Project object */;

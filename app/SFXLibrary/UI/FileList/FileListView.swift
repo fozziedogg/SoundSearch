@@ -7,7 +7,8 @@ struct FileListView: View {
     @Binding var selectedFile: AudioFile?
     var showHeader: Bool = true
 
-    @State private var selectedID: Int64? = nil
+    @State private var selectedIDs: Set<Int64> = []
+    @State private var exportRequest: ExportRequest? = nil
     @State private var columnCustomization = TableColumnCustomization<AudioFileRow>()
     @State private var sortOrder: [AudioFileSort] = [AudioFileSort(field: .name)]
     @State private var sortedRows: [AudioFileRow] = []
@@ -163,7 +164,7 @@ struct FileListView: View {
 
     private var fileTable: some View {
         Table(of: AudioFileRow.self,
-              selection: $selectedID,
+              selection: $selectedIDs,
               sortOrder: $sortOrder,
               columnCustomization: $columnCustomization) {
             fixedColumns
@@ -188,6 +189,9 @@ struct FileListView: View {
                         Button("Show in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting(
                                 [URL(fileURLWithPath: row.file.fileURL)])
+                        }
+                        Button(exportMenuTitle(for: row)) {
+                            exportRequest = ExportRequest(files: exportTargets(for: row))
                         }
                         if env.activeProjectID != nil {
                             Divider()
@@ -230,8 +234,8 @@ struct FileListView: View {
         .onChange(of: env.audioFiles.count)   { _, _ in applySort() }
         .onChange(of: vm.searchResults.count) { _, _ in applySort() }
         .onChange(of: vm.searchQuery)         { _, _ in applySort() }
-        .onChange(of: selectedID) { _, newID in
-            guard let id = newID else { selectedFile = nil; return }
+        .onChange(of: selectedIDs) { _, newIDs in
+            guard let id = newIDs.first else { selectedFile = nil; return }
             selectedFile = env.audioFiles.first { $0.id == id }
                         ?? vm.searchResults.first { $0.id == id }
         }
@@ -268,6 +272,24 @@ struct FileListView: View {
             FolderChangesSheet(isPresented: $showChangesSheet)
                 .environment(env)
         }
+        .sheet(item: $exportRequest) { req in
+            ExportSheet(files: req.files)
+        }
+    }
+
+    /// Files an export action should target: the multi-selection when the
+    /// right-clicked row is part of it, otherwise just that row.
+    private func exportTargets(for row: AudioFileRow) -> [AudioFile] {
+        if selectedIDs.contains(row.id) {
+            let sel = sortedRows.filter { selectedIDs.contains($0.id) }.map(\.file)
+            if !sel.isEmpty { return sel }
+        }
+        return [row.file]
+    }
+
+    private func exportMenuTitle(for row: AudioFileRow) -> String {
+        let count = selectedIDs.contains(row.id) ? selectedIDs.count : 1
+        return count > 1 ? "Export \(count) Files…" : "Export…"
     }
 
     // MARK: - Fixed columns (technical identity — always shown)

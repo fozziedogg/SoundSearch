@@ -98,6 +98,7 @@ private struct ProjectRow: View {
 
     @State private var editName: String = ""
     @State private var isDropTargeted = false
+    @State private var exportRequest: ExportRequest? = nil
     @FocusState private var renameFocused: Bool
 
     var body: some View {
@@ -158,12 +159,22 @@ private struct ProjectRow: View {
                 editName = project.name
                 isRenaming = true
             }
+            Button("Export Project…") {
+                guard let id = project.id else { return }
+                Task {
+                    let files = await env.filesForProject(id)
+                    if !files.isEmpty { exportRequest = ExportRequest(files: files) }
+                }
+            }
             Divider()
             Button(role: .destructive) {
                 if let id = project.id { env.deleteProject(id) }
             } label: {
                 Label("Delete Project", systemImage: "trash")
             }
+        }
+        .sheet(item: $exportRequest) { req in
+            ExportSheet(files: req.files)
         }
     }
 
