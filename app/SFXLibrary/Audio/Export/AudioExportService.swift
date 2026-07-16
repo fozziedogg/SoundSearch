@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import SwiftLAME
 import os
 
 /// Settings for a single export/convert operation.
@@ -19,7 +20,6 @@ enum ExportError: LocalizedError {
     case converterInitFailed
     case conversionFailed(String)
     case writeFailed(String)
-    case mp3EncoderUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -28,7 +28,6 @@ enum ExportError: LocalizedError {
         case .converterInitFailed:    return "Could not create an audio converter for this format."
         case .conversionFailed(let m): return "Audio conversion failed: \(m)"
         case .writeFailed(let m):     return "Could not write the exported file: \(m)"
-        case .mp3EncoderUnavailable:  return "MP3 export is not available in this build."
         }
     }
 }
@@ -176,13 +175,42 @@ enum AudioExportService {
         }
     }
 
-    /// MP3 encoding via the LAME wrapper. Implemented once the SwiftLAME package
-    /// is added (see the audio-export plan). Until then this throws so the rest of
-    /// the export pipeline can ship and be tested with the native formats.
+    /// MP3 encoding via the LAME wrapper (SwiftLAME). The mastering-converted
+    /// buffer is written to a temp WAV at the target rate, then LAME encodes at
+    /// the matching rate (no second resample). Runs synchronously on this
+    /// background thread via a semaphore.
     private static func encodeMP3(buffer: AVAudioPCMBuffer,
                                   commonFmt: AVAudioCommonFormat,
                                   sampleRate: Int, channels: Int,
                                   bitrateKbps: Int, dest: URL) throws {
-        throw ExportError.mp3EncoderUnavailable
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SFXLibraryExport", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        let tmpWav = tmpDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("wav")
+        defer { try? FileManager.default.removeItem(at: tmpWav) }
+
+        let wavSettings = AudioExportFormat.wav.fileSettings(
+            sampleRate: sampleRate, channels: channels, resolvedBitDepth: 16, bitrate: 0)
+        try writeViaAVAudioFile(buffer, settings: wavSettings, commonFmt: commonFmt, dest: tmpWav)
+
+        let config = LameConfiguration(sampleRate: .custom(Int32(sampleRate)),
+                                       bitrateMode: .constant(Int32(bitrateKbps)),
+                                       quality: .best)
+        let encoder: SwiftLameEncoder
+        do {
+            encoder = try SwiftLameEncoder(sourceUrl: tmpWav, configuration: config, destinationUrl: dest)
+        } catch {
+            throw ExportError.writeFailed(error.localizedDescription)
+        }
+
+        let sem = DispatchSemaphore(value: 0)
+        var encError: Error?
+        Task.detached(priority: .userInitiated) {
+            do { try await encoder.encode(priority: .userInitiated) }
+            catch { encError = error }
+            sem.signal()
+        }
+        sem.wait()
+        if let encError { throw ExportError.writeFailed(encError.localizedDescription) }
     }
 }
