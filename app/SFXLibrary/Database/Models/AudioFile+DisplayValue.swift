@@ -38,6 +38,8 @@ extension AudioFile {
         case .ixmlLocationName: return ne(ixmlLocationName)
         // File attributes
         case .filePath:         return ne(fileURL)
+        case .containingFolder:
+            return ne(URL(fileURLWithPath: fileURL).deletingLastPathComponent().path)
         // bext
         case .bextDescription:   return ne(bwfDescription)
         case .bextOriginator:    return ne(bwfOriginator)

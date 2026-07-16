@@ -56,6 +56,7 @@ enum BWFFieldKey: String, CaseIterable, Identifiable {
     case ixmlLocationGPS  = "ixml.locationGPS"
     // File attributes (not BWF metadata — sourced from the file itself)
     case filePath         = "file.path"
+    case containingFolder = "file.folder"
     // RIFF LIST/INFO
     case infoTitle      = "info.title"
     case infoArtist     = "info.artist"
@@ -116,6 +117,7 @@ enum BWFFieldKey: String, CaseIterable, Identifiable {
         case .ixmlLocationName: return "Location"
         case .ixmlLocationGPS:  return "GPS"
         case .filePath:       return "File Path"
+        case .containingFolder: return "Containing Folder"
         case .infoTitle:      return "Title"
         case .infoArtist:     return "Artist"
         case .infoComment:    return "Comment"
@@ -170,6 +172,7 @@ enum BWFFieldKey: String, CaseIterable, Identifiable {
         case .ixmlFamilyName:   return "ixml_family_name"
         case .ixmlLocationName: return "ixml_location_name"
         case .filePath:         return "file_url"
+        case .containingFolder: return "file_url"
         case .bextDescription:  return "bwf_description"
         case .bextOriginator:   return "bwf_originator"
         case .bextOriginatorRef: return "bwf_originator_ref"
@@ -228,7 +231,7 @@ enum BWFFieldKey: String, CaseIterable, Identifiable {
              .bextMaxShortTerm, .bextCodingHistory, .bextTimeReferenceSamples:
             return .bext
         case .ixmlFamilyName, .ixmlFamilyUID, .ixmlFileSetIndex, .ixmlTotalFiles,
-             .ixmlLocationName, .ixmlLocationGPS, .filePath:
+             .ixmlLocationName, .ixmlLocationGPS, .filePath, .containingFolder:
             return .fileFamily
         case .infoTitle, .infoArtist, .infoComment, .infoCopyright, .infoGenre,
              .infoCreated, .infoSoftware, .infoEngineer, .infoSource, .infoProduct,
