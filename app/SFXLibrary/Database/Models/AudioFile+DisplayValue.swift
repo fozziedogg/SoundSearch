@@ -36,6 +36,8 @@ extension AudioFile {
         // iXML file family / location
         case .ixmlFamilyName:   return ne(ixmlFamilyName)
         case .ixmlLocationName: return ne(ixmlLocationName)
+        // File attributes
+        case .filePath:         return ne(fileURL)
         // bext
         case .bextDescription:   return ne(bwfDescription)
         case .bextOriginator:    return ne(bwfOriginator)
