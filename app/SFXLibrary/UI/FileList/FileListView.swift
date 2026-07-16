@@ -234,11 +234,44 @@ struct FileListView: View {
         .onChange(of: env.audioFiles.count)   { _, _ in applySort() }
         .onChange(of: vm.searchResults.count) { _, _ in applySort() }
         .onChange(of: vm.searchQuery)         { _, _ in applySort() }
-        .onChange(of: selectedIDs) { _, newIDs in
-            guard let id = newIDs.first else { selectedFile = nil; return }
-            selectedFile = env.audioFiles.first { $0.id == id }
-                        ?? vm.searchResults.first { $0.id == id }
+        .onChange(of: selectedIDs) { oldIDs, newIDs in
+            updatePreview(old: oldIDs, new: newIDs)
         }
+    }
+
+    /// Keeps the Preview/waveform on the *last-clicked* row as the selection
+    /// changes. Newly added rows are the click target: ⌘-click adds exactly one;
+    /// a shift-click adds a contiguous range whose end farthest from the previous
+    /// anchor is the row that was clicked.
+    private func updatePreview(old: Set<Int64>, new: Set<Int64>) {
+        guard !new.isEmpty else { selectedFile = nil; return }
+        let added = new.subtracting(old)
+        let order = sortedRows.map(\.id)
+
+        let pick: Int64?
+        if added.isEmpty {
+            // Only a deselection — keep the current preview if it's still selected.
+            if let cur = selectedFile?.id, new.contains(cur) { return }
+            pick = order.first { new.contains($0) }
+        } else if added.count == 1 {
+            pick = added.first
+        } else {
+            // Shift-range: the added row farthest from the prior anchor is the click.
+            let addedIdx = added.compactMap { id in order.firstIndex(of: id).map { ($0, id) } }
+            if let anchorIdx = old.compactMap({ order.firstIndex(of: $0) }).min() {
+                pick = addedIdx.max { abs($0.0 - anchorIdx) < abs($1.0 - anchorIdx) }?.1
+            } else {
+                pick = addedIdx.max { $0.0 < $1.0 }?.1
+            }
+        }
+
+        if let pick { selectedFile = resolveFile(id: pick) }
+    }
+
+    private func resolveFile(id: Int64) -> AudioFile? {
+        sortedRows.first { $0.id == id }?.file
+            ?? env.audioFiles.first { $0.id == id }
+            ?? vm.searchResults.first { $0.id == id }
     }
 
     var body: some View {
