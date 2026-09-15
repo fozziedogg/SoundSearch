@@ -1,0 +1,96 @@
+## macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+
+## Xcode — user-specific state
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+*.xcscmblueprint
+*.xccheckout
+*.perspectivev3
+*.mode1v3
+*.mode2v3
+*.pbxuser
+!default.pbxuser
+!default.mode1v3
+!default.mode2v3
+!default.perspectivev3
+
+## Xcode build output
+build/
+DerivedData/
+*.xcworkspace/xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+## Built app bundles (build output — ship via releases, not git)
+SoundSearch.app/
+*.app/
+*.app.dSYM/
+
+## Code coverage / profiling
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+*.xcresult/
+
+## Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+# Package.resolved IS tracked in the xcodeproj — pins dependency versions
+!app/SFXLibrary.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+## CocoaPods / Carthage (not used today; guard against accidental commits)
+Pods/
+Carthage/Build/
+
+## Fastlane
+fastlane/report.xml
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+## Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+## Signing & secrets — never commit
+*.p12
+*.mobileprovision
+*.provisionprofile
+*.cer
+*.certSigningRequest
+*.keychain
+*.jks
+ExportOptions.plist
+.env
+.env.*
+
+## SoundSearch runtime data (generated at runtime, machine-specific)
+app/SFXLibrary\ Data/Debug\ Logs/
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
+
+## PTSL SDK — track source, skip generated Doxygen docs
+sdk/**/docs/
+sdk/**/DOCUMENTATION.html
+
+## Editor / tooling
+.claude/settings.local.json
+.vscode/*
+!.vscode/settings.json
+.idea/
+*.swp
+*~

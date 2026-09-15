@@ -1,0 +1,24 @@
+{
+  "originHash" : "650483417612a04b0cf231afa6b067dc9336a99587655dd01824fd1ddc137a77",
+  "pins" : [
+    {
+      "identity" : "grdb.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/groue/GRDB.swift",
+      "state" : {
+        "branch" : "master",
+        "revision" : "36e30a6f1ef10e4194f6af0cff90888526f0c115"
+      }
+    },
+    {
+      "identity" : "swiftlame",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/hidden-spectrum/SwiftLAME",
+      "state" : {
+        "revision" : "45d1b021c2bd2bbd38b9669934c0584cda0d1b6b",
+        "version" : "0.1.0"
+      }
+    }
+  ],
+  "version" : 3
+}
