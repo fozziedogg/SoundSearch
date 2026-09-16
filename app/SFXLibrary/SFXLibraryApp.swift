@@ -95,6 +95,22 @@ struct SFXLibraryApp: App {
                     NSWorkspace.shared.activateFileViewerSelecting([env.currentDatabaseURL])
                 }
 
+                Button("Show Debug Logs in Finder") {
+                    let logs = env.currentDatabaseURL
+                        .deletingLastPathComponent()
+                        .appendingPathComponent("Debug Logs")
+                    NSWorkspace.shared.activateFileViewerSelecting([logs])
+                }
+
+                // Repoints stored paths after a drive remounts elsewhere or the database
+                // is moved between systems — the alternative is a full re-index.
+                Menu("Relocate Library…") {
+                    ForEach(env.watchedFolders) { folder in
+                        Button(folder.path) { env.requestRelocation(for: folder.path) }
+                    }
+                }
+                .disabled(env.watchedFolders.isEmpty || env.isScanning)
+
                 Button("Rename Database…") {
                     pendingDatabaseName = env.currentDatabaseURL
                         .deletingPathExtension().lastPathComponent

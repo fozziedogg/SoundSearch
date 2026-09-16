@@ -67,6 +67,11 @@ struct AudioFile: Identifiable, Hashable, Codable, FetchableRecord, MutablePersi
     var infoSubject: String = ""
     var infoTechnician: String = ""
 
+    // Durable location identity (v6). fileURL is regenerated from these on every open;
+    // nil on rows written before v6 whose volume has not been seen mounted since.
+    var volumeUUID: String? = nil
+    var volumeRelativePath: String? = nil
+
     // DB-only custom metadata
     var notes: String
     var starRating: Int             // 0–5
@@ -125,6 +130,8 @@ struct AudioFile: Identifiable, Hashable, Codable, FetchableRecord, MutablePersi
         case infoProduct    = "info_product"
         case infoSubject    = "info_subject"
         case infoTechnician = "info_technician"
+        case volumeUUID         = "volume_uuid"
+        case volumeRelativePath = "volume_relative_path"
         case starRating      = "star_rating"
         case dateAdded       = "date_added"
         case lastModified    = "last_modified"

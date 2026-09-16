@@ -7,6 +7,10 @@ final class LibraryService {
     private let db: DatabasePool
     private let fileRepo: AudioFileRepository
 
+    /// Shared across services and scans — mount points change rarely, and the resolver
+    /// re-derives everything on the next database open anyway.
+    static let volumeCache = VolumeIndex.Cache()
+
     init(db: DatabasePool) {
         self.db       = db
         self.fileRepo = AudioFileRepository(db: db)
@@ -25,6 +29,10 @@ final class LibraryService {
         if !force,
            let existing = try? fileRepo.fetch(fileURL: url.path),
            existing.mtime == mtimeDouble { return }
+
+        // Durable identity, resolved through a per-mount cache so a 100k-file scan does
+        // one volume lookup per drive rather than one per file.
+        let location = Self.volumeCache.split(path: url.path)
 
         var file = AudioFile(
             id: nil,
@@ -50,6 +58,8 @@ final class LibraryService {
             ixmlNote:        "",
             ucsCategory:     "",
             ucsSubCategory:  "",
+            volumeUUID:         location?.identity.key,
+            volumeRelativePath: location?.relativePath,
             notes:      "",
             starRating: 0,
             dateAdded:     Date(),
@@ -109,8 +119,11 @@ final class LibraryService {
 
     func addWatchedFolder(url: URL, scanner: FolderScanner) throws {
         let bookmark = (try? url.bookmarkData()) ?? Data()
+        let location = VolumeIndex.split(path: url.path)
         var folder = WatchedFolder(id: nil, path: url.path,
-                                   bookmarkData: bookmark, dateAdded: Date())
+                                   bookmarkData: bookmark, dateAdded: Date(),
+                                   volumeUUID: location?.identity.key,
+                                   volumeRelativePath: location?.relativePath)
         try db.write { db in try folder.upsert(db) }
         scanner.scan(path: url.path)
     }

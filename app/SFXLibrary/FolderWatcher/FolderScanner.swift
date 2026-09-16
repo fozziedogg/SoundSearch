@@ -40,6 +40,9 @@ final class FolderScanner {
     private func scanFolder(path: String, force: Bool) async {
         await MainActor.run { onScanStarted?(path) }
         print("[FolderScanner] scanFolder start: \(path) force=\(force)")
+        LibraryDiagnostics.log("=== scan start ===")
+        LibraryDiagnostics.log("path=\(path) force=\(force)")
+        LibraryDiagnostics.log("scan \(LibraryDiagnostics.volumeInfo(for: path).summary)")
 
         let fm  = FileManager.default
         let url = URL(fileURLWithPath: path)
@@ -49,16 +52,21 @@ final class FolderScanner {
             options: [.skipsHiddenFiles]
         ) else {
             print("[FolderScanner] enumerator nil — cannot access path")
+            LibraryDiagnostics.log("scan aborted — enumerator nil (path unreadable or not mounted)")
             await MainActor.run { onScanFinished?(path) }
             return
         }
 
         // Pre-load all known mtimes: one SELECT instead of one per file.
         let knownMtimes: [String: Double] = force ? [:] : ((try? libraryService.fetchAllMtimes()) ?? [:])
+        LibraryDiagnostics.log("mtime cache loaded — \(knownMtimes.count) rows")
 
         var count = 0
         var audioCount = 0
         var skipped = 0
+        var pathHits = 0            // disk path found in the DB at all (regardless of mtime)
+        var mismatchWarned = false
+        var sampleMissPath: String? = nil
         var failures: [ScanFailure] = []
         var foundPaths = Set<String>()
 
@@ -67,6 +75,27 @@ final class FolderScanner {
             guard isAudioFile(fileURL) else { continue }
             audioCount += 1
             foundPaths.insert(fileURL.path)
+
+            // Track path-level hits separately from mtime hits. A full-library re-ingest
+            // caused by a changed mount point looks exactly like a first-ever scan unless
+            // this ratio is recorded: 0 path hits against a non-empty cache means the
+            // paths in the database no longer describe this machine.
+            if knownMtimes[fileURL.path] != nil {
+                pathHits += 1
+            } else if sampleMissPath == nil {
+                sampleMissPath = fileURL.path
+            }
+
+            if !mismatchWarned, !force, !knownMtimes.isEmpty, audioCount >= 200, pathHits == 0 {
+                mismatchWarned = true
+                let sampleDBPath = knownMtimes.keys.sorted().first ?? "?"
+                LibraryDiagnostics.log("*** PATH MISMATCH SUSPECTED ***")
+                LibraryDiagnostics.log("    \(audioCount) files scanned, 0 matched any file_url in the database.")
+                LibraryDiagnostics.log("    on disk: \(sampleMissPath ?? "?")")
+                LibraryDiagnostics.log("    in DB  : \(sampleDBPath)")
+                LibraryDiagnostics.log("    This scan will re-ingest the entire library. Stop it and use "
+                    + "Library > Relocate Library… to rewrite the stored paths instead.")
+            }
 
             // Fast path: skip unchanged files.
             if !force,
@@ -101,6 +130,14 @@ final class FolderScanner {
 
         let ingested = audioCount - skipped - failures.count
         print("[FolderScanner] done — \(count) visited, \(skipped) unchanged, \(ingested) ingested, \(removed) removed, \(failures.count) errors")
+        let hitRate = audioCount > 0 ? Int((Double(pathHits) / Double(audioCount)) * 100) : 0
+        LibraryDiagnostics.log("scan done — \(count) visited, \(audioCount) audio, "
+            + "path-cache hits \(pathHits)/\(audioCount) (\(hitRate)%), "
+            + "\(skipped) unchanged, \(ingested) ingested, \(removed) removed, \(failures.count) errors")
+        if removed > 0 && hitRate == 0 && !knownMtimes.isEmpty {
+            LibraryDiagnostics.log("NOTE: \(removed) rows were deleted as \"missing from disk\" while nothing "
+                + "matched on path — likely the same files under a stale prefix, not real deletions.")
+        }
         libraryService.updateScannedFileCount(path: path, count: audioCount)
         writeLog(scanPath: path, failures: failures)
         await MainActor.run { onScanFinished?(path) }

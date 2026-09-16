@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		01BFCC0130190099008C0966 /* SwiftLAME in Frameworks */ = {isa = PBXBuildFile; productRef = BB01AE0100000000000000B2 /* SwiftLAME */; };
 		A438E7392F8718FD00DBE776 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = A438E7382F8718FD00DBE776 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -28,7 +29,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		A438E6582F8714A200DBE776 /* SFXLibrary.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = SFXLibrary.app; path = SoundSearch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A438E6582F8714A200DBE776 /* SoundSearch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SoundSearch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A438E6672F8714A400DBE776 /* SFXLibraryTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SFXLibraryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A438E6712F8714A400DBE776 /* SFXLibraryUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SFXLibraryUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -56,6 +57,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				01BFCC0130190099008C0966 /* SwiftLAME in Frameworks */,
 				A438E7392F8718FD00DBE776 /* GRDB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -90,7 +92,7 @@
 		A438E6592F8714A200DBE776 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A438E6582F8714A200DBE776 /* SFXLibrary.app */,
+				A438E6582F8714A200DBE776 /* SoundSearch.app */,
 				A438E6672F8714A400DBE776 /* SFXLibraryTests.xctest */,
 				A438E6712F8714A400DBE776 /* SFXLibraryUITests.xctest */,
 			);
@@ -121,7 +123,7 @@
 				BB01AE0100000000000000B2 /* SwiftLAME */,
 			);
 			productName = SFXLibrary;
-			productReference = A438E6582F8714A200DBE776 /* SFXLibrary.app */;
+			productReference = A438E6582F8714A200DBE776 /* SoundSearch.app */;
 			productType = "com.apple.product-type.application";
 		};
 		A438E6662F8714A400DBE776 /* SFXLibraryTests */ = {
@@ -419,7 +421,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.4;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mattchan.SoundSearch;
 				PRODUCT_NAME = SoundSearch;
@@ -462,7 +464,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.4;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mattchan.SoundSearch;
 				PRODUCT_NAME = SoundSearch;
@@ -488,7 +490,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.4;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mattchan.SFXLibraryTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -500,7 +502,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SFXLibrary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SFXLibrary";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SoundSearch.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SoundSearch";
 				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Debug;
@@ -513,7 +515,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.4;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mattchan.SFXLibraryTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -525,7 +527,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SFXLibrary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SFXLibrary";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SoundSearch.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SoundSearch";
 				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Release;
@@ -537,7 +539,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.4;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mattchan.SFXLibraryUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -561,7 +563,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.4;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mattchan.SFXLibraryUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -628,14 +630,14 @@
 				kind = branch;
 			};
 		};
-			BB01AE0100000000000000B1 /* XCRemoteSwiftPackageReference "SwiftLAME" */ = {
-				isa = XCRemoteSwiftPackageReference;
-				repositoryURL = "https://github.com/hidden-spectrum/SwiftLAME";
-				requirement = {
-					kind = upToNextMajorVersion;
-					minimumVersion = 0.1.0;
-				};
+		BB01AE0100000000000000B1 /* XCRemoteSwiftPackageReference "SwiftLAME" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/hidden-spectrum/SwiftLAME";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
 			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -644,11 +646,11 @@
 			package = A438E7372F8718FD00DBE776 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
 		};
-			BB01AE0100000000000000B2 /* SwiftLAME */ = {
-				isa = XCSwiftPackageProductDependency;
-				package = BB01AE0100000000000000B1 /* XCRemoteSwiftPackageReference "SwiftLAME" */;
-				productName = SwiftLAME;
-			};
+		BB01AE0100000000000000B2 /* SwiftLAME */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BB01AE0100000000000000B1 /* XCRemoteSwiftPackageReference "SwiftLAME" */;
+			productName = SwiftLAME;
+		};
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A438E6502F8714A200DBE776 /* Project object */;

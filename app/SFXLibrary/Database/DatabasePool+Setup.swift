@@ -334,6 +334,25 @@ extension DatabasePool {
             """)
         }
 
+        migrator.registerMigration("v6_volume_identity") { db in
+            // Durable file identity. file_url stays the working absolute path that the
+            // rest of the app reads, but it becomes derived data: on every open the path
+            // is regenerated from (volume_uuid, volume_relative_path), so a drive that
+            // remounts at /Volumes/NAME-1 no longer invalidates the whole library.
+            //
+            // Backfilled at runtime rather than here — deriving the pair needs the volume
+            // to be mounted, which SQL cannot see. Rows stay NULL until then.
+            try db.alter(table: "audio_files") { t in
+                t.add(column: "volume_uuid",          .text)
+                t.add(column: "volume_relative_path", .text)
+            }
+            try db.alter(table: "watched_folders") { t in
+                t.add(column: "volume_uuid",          .text)
+                t.add(column: "volume_relative_path", .text)
+            }
+            try db.create(index: "idx_af_volume_uuid", on: "audio_files", columns: ["volume_uuid"])
+        }
+
         try migrator.migrate(pool)
         return pool
     }
@@ -352,8 +371,9 @@ extension DatabasePool {
             .appendingPathComponent("projects.sqlite")
     }
 
-    static func setupProjectsDatabase() throws -> DatabasePool {
-        let url = projectsDatabaseURL
+    /// `url` is overridable so a failed open can retry against a scratch location
+    /// instead of taking the app down at launch.
+    static func setupProjectsDatabase(at url: URL = projectsDatabaseURL) throws -> DatabasePool {
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let pool = try DatabasePool(path: url.path)

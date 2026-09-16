@@ -103,6 +103,47 @@ final class AppEnvironment {
     /// Paths of watched folders where the disk file count differs from the DB count.
     var foldersWithChanges: [String] = []
 
+    /// Watched folders whose stored path does not exist on this machine — usually a
+    /// volume that remounted elsewhere, or a database copied from another system.
+    /// These need relocation, never a rescan.
+    var missingFolders: [WatchedFolder] = []
+
+    /// Drives the relocation sheet. Set by the launch check or the Library menu.
+    var relocationRequest: RelocationRequest? = nil
+
+    /// Set when a database could not be opened and a fallback was used instead.
+    /// Displayed once as an alert; clearing it dismisses the alert.
+    var databaseOpenFailure: DatabaseOpenFailure? = nil
+
+    struct DatabaseOpenFailure: Identifiable, Equatable {
+        var id: String { attemptedPath }
+        var attemptedPath: String
+        var reason: String
+        var openedInstead: String
+
+        var message: String {
+            """
+            SoundSearch couldn't open:
+            \(attemptedPath)
+
+            \(reason)
+
+            It opened this instead, so the app still runs:
+            \(openedInstead)
+
+            The original file was not modified or deleted. If it was copied from another \
+            system, copy it again with the app closed — a database copied while it is open \
+            loses the changes held in its .sqlite-wal sidecar file.
+            """
+        }
+    }
+
+    struct RelocationRequest: Identifiable, Equatable {
+        var id: String { oldPath }
+        var oldPath: String
+        var suggestedNewPath: String?
+    }
+
     // MARK: - Projects (global, stored in Application Support/SoundSearch)
 
     var projects: [Project] = []
@@ -218,20 +259,119 @@ final class AppEnvironment {
 
     private static let lastDBPathKey = "lastDatabasePath"
 
+    // MARK: - Fault-tolerant database opening
+
+    private struct OpenedDatabase {
+        var pool: DatabasePool
+        var url: URL
+        /// nil when `preferred` opened normally.
+        var failure: DatabaseOpenFailure?
+    }
+
+    /// Opens `preferred`, falling back in order to the default database, a new recovery
+    /// file beside it, and finally a scratch file in the temporary directory.
+    ///
+    /// Nothing here deletes or rewrites a database that failed to open — a file that
+    /// SQLite rejects today may still be salvageable, and it may be the only copy of a
+    /// library that took hours to build.
+    private static func openDatabaseWithFallback(preferred: URL) -> OpenedDatabase {
+        var candidates = [preferred]
+        if preferred.path != DatabasePool.databaseURL.path {
+            candidates.append(DatabasePool.databaseURL)
+        }
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        candidates.append(DatabasePool.databaseDirectory
+            .appendingPathComponent("library-recovered-\(stamp).sqlite"))
+        candidates.append(URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("SoundSearch-\(stamp).sqlite"))
+
+        var firstReason: String?
+        for url in candidates {
+            do {
+                let pool = try DatabasePool.setup(at: url)
+                guard let reason = firstReason else {
+                    return OpenedDatabase(pool: pool, url: url, failure: nil)
+                }
+                return OpenedDatabase(pool: pool, url: url,
+                                      failure: DatabaseOpenFailure(attemptedPath: preferred.path,
+                                                                   reason: reason,
+                                                                   openedInstead: url.path))
+            } catch {
+                let reason = "\(error)"
+                if firstReason == nil { firstReason = reason }
+                print("[AppEnv] could not open \(url.path): \(reason)")
+            }
+        }
+
+        // Every candidate failed, including a brand-new file in the temporary directory.
+        // There is no database to run against; report the original reason rather than an
+        // unlabelled trap.
+        fatalError("SoundSearch could not open or create any database. "
+            + "First failure: \(firstReason ?? "unknown")")
+    }
+
+    /// The projects database only holds playlist membership and is cheap to recreate, so
+    /// a failure here falls back to a scratch copy rather than taking the app down.
+    private static func openProjectsDatabaseWithFallback() -> DatabasePool {
+        do {
+            return try DatabasePool.setupProjectsDatabase()
+        } catch {
+            LibraryDiagnostics.log("*** could not open projects database — \(error)")
+            let stamp = ISO8601DateFormatter().string(from: Date())
+                .replacingOccurrences(of: ":", with: "-")
+            let fallback = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("SoundSearch-projects-\(stamp).sqlite")
+            guard let pool = try? DatabasePool.setupProjectsDatabase(at: fallback) else {
+                fatalError("SoundSearch could not open or create a projects database: \(error)")
+            }
+            LibraryDiagnostics.log("    using \(fallback.path) for this session — "
+                + "projects created now will not persist to the usual location")
+            return pool
+        }
+    }
+
     init() {
         // Restore the last-used database path (fall back to default if missing/gone).
+        var restoredFromDefaults = false
         let restoredURL: URL = {
             if let path = UserDefaults.standard.string(forKey: AppEnvironment.lastDBPathKey) {
                 let url = URL(fileURLWithPath: path)
-                if FileManager.default.fileExists(atPath: url.path) { return url }
+                if FileManager.default.fileExists(atPath: url.path) {
+                    restoredFromDefaults = true
+                    return url
+                }
             }
             return DatabasePool.databaseURL
         }()
 
-        let db = try! DatabasePool.setup(at: restoredURL)
+        // The restored path is only known to exist, not to be openable. A database copied
+        // between systems without its -wal sidecar, truncated mid-copy, or left on an
+        // unreadable volume throws here. Since the path is persisted in UserDefaults, a
+        // trap on this line means every subsequent launch traps too, with no way out from
+        // inside the app — so open with fallbacks instead.
+        let opened = AppEnvironment.openDatabaseWithFallback(preferred: restoredURL)
+        let db = opened.pool
         self.db = db
-        self.currentDatabaseURL = restoredURL
-        SFXAudioLog.configure(directory: restoredURL.deletingLastPathComponent())
+        self.currentDatabaseURL = opened.url
+        SFXAudioLog.configure(directory: opened.url.deletingLastPathComponent())
+        LibraryDiagnostics.logDatabaseOpen(url: opened.url,
+                                           restoredFromDefaults: restoredFromDefaults && opened.failure == nil,
+                                           defaultURL: DatabasePool.databaseURL)
+
+        if let failure = opened.failure {
+            self.databaseOpenFailure = failure
+            LibraryDiagnostics.log("*** could not open \(failure.attemptedPath) ***")
+            LibraryDiagnostics.log("    \(failure.reason)")
+            LibraryDiagnostics.log("    opened \(opened.url.path) instead")
+            // Stop pointing at the file that failed, or the next launch repeats this.
+            if opened.url.path == DatabasePool.databaseURL.path {
+                UserDefaults.standard.removeObject(forKey: AppEnvironment.lastDBPathKey)
+            } else {
+                UserDefaults.standard.set(opened.url.path, forKey: AppEnvironment.lastDBPathKey)
+            }
+        }
+
         self.searchRepository = SearchRepository(db: db)
         let ls = LibraryService(db: db)
         self.libraryService = ls
@@ -239,9 +379,14 @@ final class AppEnvironment {
         self.folderScanner  = scanner
         self.audioPlayer    = AudioPlayer()
 
-        let pDB = try! DatabasePool.setupProjectsDatabase()
+        let pDB = AppEnvironment.openProjectsDatabaseWithFallback()
         self.projectsDB         = pDB
         self.projectRepository  = ProjectRepository(db: pDB)
+
+        // Correct stored paths against where volumes are mounted right now, before any
+        // observation reads a row. A drive that came back at /Volumes/NAME-1 is repaired
+        // here rather than being mistaken for 50,000 deleted files.
+        VolumeResolver(libraryDB: db, projectsDB: pDB).run()
 
         startObservations(db: db, ls: ls, scanner: scanner)
 
@@ -313,7 +458,19 @@ final class AppEnvironment {
         }
 
         // Open the renamed database (releases the temp pool) and restart everything.
-        switchToDatabase(at: newURL)
+        if !switchToDatabase(at: newURL) {
+            // The files are already renamed but the result won't open. Put them back and
+            // reopen the original, otherwise the temp pool below is left holding files
+            // that are about to be deleted.
+            for suffix in ["", "-wal", "-shm"] {
+                let old = oldURL.path + suffix
+                let new = newURL.path + suffix
+                if FileManager.default.fileExists(atPath: new) {
+                    try? FileManager.default.moveItem(atPath: new, toPath: old)
+                }
+            }
+            switchToDatabase(at: oldURL)
+        }
 
         // Temp pool is now closed — clean up its files.
         for suffix in ["", "-wal", "-shm"] {
@@ -403,7 +560,25 @@ final class AppEnvironment {
 
     /// Tears down the current setup and opens a database at `url`, running migrations.
     /// Persists the choice to UserDefaults so it's restored on next launch.
-    func switchToDatabase(at url: URL, persist: Bool = true) {
+    /// Returns false if `url` could not be opened, in which case nothing changes.
+    @discardableResult
+    func switchToDatabase(at url: URL, persist: Bool = true) -> Bool {
+        // Open before tearing anything down. The old code persisted the path and replaced
+        // the pool first, so picking an unreadable file left the app pointing at a
+        // database it could not open — and that path was then restored on next launch.
+        let newDB: DatabasePool
+        do {
+            newDB = try DatabasePool.setup(at: url)
+        } catch {
+            print("[AppEnv] switchToDatabase: failed to open \(url.lastPathComponent) — \(error)")
+            LibraryDiagnostics.log("switchToDatabase FAILED — \(url.path)")
+            LibraryDiagnostics.log("    \(error)")
+            databaseOpenFailure = DatabaseOpenFailure(attemptedPath: url.path,
+                                                      reason: "\(error)",
+                                                      openedInstead: currentDatabaseURL.path)
+            return false
+        }
+
         filterTask?.cancel()
         filterTask = nil
         folderFilter = nil      // clear stale filter; didSet may create a new filterTask
@@ -415,23 +590,24 @@ final class AppEnvironment {
         observationGeneration += 1
         databaseEpoch += 1
         foldersWithChanges = []
+        missingFolders = []
+        relocationRequest = nil
         launchCheckDone = false
         projectTask?.cancel()
         projectTask = nil
         activeProjectFileURLs = []
         activeProjectID = nil
 
-        // Update URL and persist immediately — title bar and menu reflect the new
-        // name regardless of whether the pool setup below succeeds.
+        // The open already succeeded, so persisting here can only record a path that
+        // works. Title bar and menu follow currentDatabaseURL.
         self.currentDatabaseURL = url
         if persist {
             UserDefaults.standard.set(url.path, forKey: AppEnvironment.lastDBPathKey)
         }
 
-        guard let newDB = try? DatabasePool.setup(at: url) else {
-            print("[AppEnv] switchToDatabase: failed to open \(url.lastPathComponent)")
-            return
-        }
+        LibraryDiagnostics.logDatabaseOpen(url: url, restoredFromDefaults: false,
+                                           defaultURL: DatabasePool.databaseURL)
+        VolumeResolver(libraryDB: newDB, projectsDB: projectsDB).run()
         self.db             = newDB
         let ls              = LibraryService(db: newDB)
         self.libraryService = ls
@@ -443,6 +619,7 @@ final class AppEnvironment {
         watchedFolders = []
 
         startObservations(db: newDB, ls: ls, scanner: scanner)
+        return true
     }
 
     // MARK: - Project management
@@ -518,18 +695,83 @@ final class AppEnvironment {
     /// Counts audio files on disk per folder and compares to the count stored after
     /// the last scan. Folders that have never been scanned (scannedFileCount == nil)
     /// are skipped — no spurious warning on first launch.
+    ///
+    /// A folder whose path is gone entirely is reported as missing rather than changed.
+    /// Counting it would return 0, flag it as "changed", and steer the user into a
+    /// full rescan — the exact multi-hour re-ingest that relocation exists to avoid.
     private func checkForFolderChanges(folders: [WatchedFolder]) {
         Task.detached(priority: .background) { [weak self] in
             var changed: [String] = []
+            var missing: [WatchedFolder] = []
             for folder in folders {
+                if !FileManager.default.fileExists(atPath: folder.path) {
+                    missing.append(folder)
+                    continue
+                }
                 guard let stored = folder.scannedFileCount else { continue }
                 let diskCount = Self.countAudioFiles(in: folder.path)
                 if diskCount != stored { changed.append(folder.path) }
             }
-            if !changed.isEmpty {
-                await MainActor.run { self?.foldersWithChanges = changed }
+            let finalChanged = changed
+            let finalMissing = missing
+            await MainActor.run {
+                guard let self else { return }
+                if !finalChanged.isEmpty { self.foldersWithChanges = finalChanged }
+                self.missingFolders = finalMissing
+                if let first = finalMissing.first, self.relocationRequest == nil {
+                    self.relocationRequest = RelocationRequest(
+                        oldPath: first.path,
+                        suggestedNewPath: LibraryRelocator.suggestedNewLocation(forMissing: first.path))
+                }
             }
         }
+    }
+
+    // MARK: - Library relocation
+
+    private var relocator: LibraryRelocator {
+        LibraryRelocator(libraryDB: db, projectsDB: projectsDB)
+    }
+
+    /// Counts what a relocation would rewrite, for display before the user commits.
+    func previewRelocation(from oldPath: String, to newPath: String) -> LibraryRelocator.Preview? {
+        try? relocator.preview(from: oldPath, to: newPath)
+    }
+
+    /// Rewrites every stored path under `oldPath` to `newPath` and reloads the UI.
+    /// Returns nil on failure; the error is written to the diagnostics log.
+    @discardableResult
+    func relocateLibrary(from oldPath: String, to newPath: String) -> LibraryRelocator.Result? {
+        guard !isScanning else {
+            LibraryDiagnostics.log("relocate refused — scan in progress")
+            return nil
+        }
+        do {
+            let result = try relocator.relocate(from: oldPath, to: newPath)
+            missingFolders.removeAll { $0.path == oldPath || $0.path.hasPrefix(oldPath + "/") }
+            foldersWithChanges.removeAll { $0 == oldPath || $0.hasPrefix(oldPath + "/") }
+            relocationRequest = nil
+
+            // Project membership lives in a separate database and is cached in memory.
+            // Re-read it so the rewritten URLs take effect without a relaunch.
+            if let id = activeProjectID {
+                activeProjectID = nil
+                activeProjectID = id
+            } else {
+                startFilesObservation(db: db)
+            }
+            return result
+        } catch {
+            LibraryDiagnostics.log("relocate failed — \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Opens the relocation sheet for a specific folder (Library menu / sidebar action).
+    func requestRelocation(for path: String) {
+        relocationRequest = RelocationRequest(
+            oldPath: path,
+            suggestedNewPath: LibraryRelocator.suggestedNewLocation(forMissing: path))
     }
 
     /// Fast recursive count of WAV/AIFF files — reads only filenames, no file content.
@@ -605,6 +847,7 @@ final class AppEnvironment {
                 self.watchedFolders = folders
                 if !self.launchCheckDone && !folders.isEmpty {
                     self.launchCheckDone = true
+                    LibraryDiagnostics.logWatchedFolders(folders)
                     self.checkForFolderChanges(folders: folders)
                 }
             }

@@ -104,6 +104,21 @@ struct MainWindowView: View {
                 selectedFile = nil
             }
         }
+        .sheet(item: Binding(
+            get: { env.relocationRequest },
+            set: { env.relocationRequest = $0 }
+        )) { request in
+            RelocateLibrarySheet(request: request)
+                .environment(env)
+        }
+        .alert("Couldn't Open Database", isPresented: Binding(
+            get: { env.databaseOpenFailure != nil },
+            set: { if !$0 { env.databaseOpenFailure = nil } }
+        ), presenting: env.databaseOpenFailure) { _ in
+            Button("OK") { env.databaseOpenFailure = nil }
+        } message: { failure in
+            Text(failure.message)
+        }
     }
 }
 
